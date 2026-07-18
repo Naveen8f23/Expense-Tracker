@@ -9,6 +9,51 @@ versioned releases begin.
 ## [Unreleased]
 
 ### Added (code)
+- **Epic B, B1 (Gmail OAuth connect flow) complete** — `GET /gmail/connect`/`GET /gmail/callback`
+  (`app/presentation/gmail_router.py`, `app/application/connect_gmail_account.py`,
+  `app/infrastructure/gmail_oauth.py`), using Google's official client libraries (ADR-0018).
+  Read-only scope only (ING-2); tokens stored encrypted (ADR-0015). Verified with mocked
+  responses (23 backend tests, passing on both macOS and the Ubuntu VM per ADR-0017) and against
+  the owner's real Gmail account per ADR-0014. Fixed a real bug caught during that live
+  verification: the token exchange initially failed with `invalid_grant: Missing code verifier`
+  because the PKCE `code_verifier` Google's client library auto-generates wasn't carried over
+  from the authorization step to the exchange step (two separate `Flow` objects) — now passed
+  through explicitly, with a regression test.
+- **Epic B, B2 (SenderRule seed data) complete** — `ensure_hdfc_sender_rules`
+  (`app/infrastructure/bootstrap.py`) seeds the three confirmed HDFC templates (Appendix A);
+  called from a new FastAPI lifespan hook alongside `ensure_default_user`, so baseline config
+  data exists whenever the app runs rather than only lazily on first use. Verified against the
+  real local database (exactly 3 rows, correct values, B1's existing connection untouched) and
+  with 4 new tests (27/27 backend tests passing on macOS and the Ubuntu VM).
+- **Epic B, B3 (one-time backfill sync) complete** — `run_initial_backfill`
+  (`app/application/run_initial_backfill.py`, `app/infrastructure/gmail_client.py`), chained
+  automatically at the end of `/gmail/callback`. Fetches every message from the configured
+  `SenderRule` senders dated from the 1st of the connection's setup month (ADR-0011) onward,
+  caches each as an encrypted, unprocessed `email_messages` row (dedup'd by Gmail message ID,
+  ING-6/DUP-1), and creates no `Transaction` rows (that's Epic C). Uses
+  google-api-python-client's built-in retry/backoff (ING-7). Verified with mocked tests
+  (14 new, 41/41 total passing on macOS and the Ubuntu VM) and against the real connected
+  account: 6 real HDFC emails backfilled on first run, correctly deduplicated (0 new) on a
+  second run.
+- **Epic B, B4 (incremental sync via Gmail History API) complete** — `run_incremental_sync`
+  (`app/application/run_incremental_sync.py`) fetches only what's changed since the stored
+  `historyId` checkpoint (ING-4/ING-5), rather than re-scanning the whole backfill window;
+  falls back to a bounded re-scan from the last successful sync time if the checkpoint has
+  aged out of Gmail's History API retention window. Shares its message-storing step with B3 via
+  a new `app/application/ingest_gmail_messages.py`. Verified with mocked tests (7 new, 48/48
+  total passing on macOS and the Ubuntu VM) and against the real connected account (correctly
+  idempotent: 0 scanned/stored on a real repeat sync). Scheduling this automatically is
+  explicitly deferred until Epic C exists (decision recorded in BACKLOG.md B4).
+- **Epic B, B5 (sync health logging & status) complete — Epic B (Gmail Ingestion) now fully
+  done** — `sync_state` gained `last_sync_started_at`, `last_scanned`, `last_matched`,
+  `last_skipped`, `last_failed` (migration `96b145d41d66`), populated by both B3 and B4.
+  `store_new_messages` (`app/application/ingest_gmail_messages.py`) now catches a per-message
+  `GmailIngestionError` and counts it as failed rather than aborting the whole sync run — one
+  oddly formatted email no longer blocks every other message in the same batch. A failed OAuth
+  token refresh already surfaced via `sync_state.last_error` from B3/B4's existing error
+  handling; added a test tying this specifically to B5's stated criterion. Verified with mocked
+  tests (5 new, 53/53 total passing on macOS and the Ubuntu VM) and against the real connected
+  account after applying the migration there too.
 - **`scripts/vm_sync.py`, `scripts/vm_test.py`, `scripts/vm_tunnel.py`, `scripts/vm_dev.py`**
   (plus shared helper `scripts/_vm.py`): stdlib-only tooling to sync to, test on, and view the
   app running on the Ubuntu verification VM in one command each, replacing the repeated manual

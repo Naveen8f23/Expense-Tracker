@@ -35,6 +35,11 @@ def start() -> None:
     vm_sync.main()
     ssh_run(_STOP_REMOTE_SERVERS)
     ssh_run(
+        f"cd {VM_REMOTE_DIR}/backend && "
+        ".venv/bin/python -m pip install --quiet -r requirements.txt",
+        check=True,
+    )
+    ssh_run(
         f"cd {VM_REMOTE_DIR} && "
         "setsid nohup python3 scripts/dev.py > /tmp/dev.log 2>&1 < /dev/null & disown"
     )
