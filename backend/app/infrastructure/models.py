@@ -87,6 +87,10 @@ class EmailMessage(Base):
     received_at: Mapped[datetime] = mapped_column(DateTime)
     status: Mapped[EmailMessageStatus] = mapped_column(Enum(EmailMessageStatus))
     content: Mapped[str] = mapped_column(EncryptedText)  # ADR-0012/ADR-0015: cached, encrypted
+    # BACKLOG.md C7: which SenderRule content pattern classification matched, if any -- preserved
+    # so a needs-review item that classified but then failed extraction still has that context
+    # (not re-derived by re-running classification later). Null if classification itself failed.
+    classified_pattern_id: Mapped[Optional[str]]
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     # One email produces at most one transaction (ADR-0009: one email = one transaction).

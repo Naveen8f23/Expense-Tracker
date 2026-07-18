@@ -65,7 +65,7 @@ Copy this block per milestone:
   the `SenderRule` parsing logic can be designed in detail.
 
 ### M3: Extraction & Deduplication
-- **Status:** Planned
+- **Status:** In Progress
 - **Target:** TBD
 - **Goal:** Turn the four matched email types into accurate, deduplicated, structured
   transactions using fixed per-type parsing rules.
@@ -73,7 +73,11 @@ Copy this block per milestone:
 - **Success criteria:** Each of the four email types extracts correctly via its fixed rule, or
   is flagged for review rather than silently wrong (EXT-6); no duplicate or double-counted
   transactions (DUP-1, DUP-2).
-- **Dependencies:** M2.
+- **Dependencies:** M2. **Progress (2026-07-19):** the Extraction half is done via BACKLOG.md
+  Epic C (C1–C8) — three of the four templates classify and extract correctly (the fourth,
+  credit card credit, is still blocked on a real sample, REQUIREMENTS.md §8); needs-review
+  routing (EXT-6) and the AI-fallback seam are in place. The Deduplication half (Epic D, DUP-1/
+  DUP-2) has not started.
 
 ### M4: Review, Correction & Traceability
 - **Status:** Planned
