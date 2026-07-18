@@ -270,6 +270,19 @@ Not a v1 feature, but a constraint on how v1 is designed:
   within the HTML body, not embedded in an image. This validates the earlier decision not to
   build a dedicated OCR pipeline (at least for this sender) — extraction just needs to parse
   past marketing boilerplate to the relevant sentence(s).
+  - **Refined 2026-07-19, from the user's own live transaction spot-check (a real, if small,
+    amount and debit/credit type each — per ADR-0014's "user verifies real results" step):**
+    "plain text" doesn't mean "unformatted." The real credit card debit template wraps its
+    merchant name, amount, card-ending digits, and date/time in `<b>...</b>` tags — a detail
+    lost when Appendix A's samples were transcribed as plain-text quotes. Extraction regexes
+    must tolerate arbitrary HTML tags between an anchor phrase and its value, not just
+    whitespace (fixed; see [DECISIONS.md](DECISIONS.md)/[CHANGELOG.md](CHANGELOG.md)).
+  - **Also discovered the same day:** HDFC sends a fifth, distinct notification — "Credit Card
+    Payment done using HDFC Bank Online Banking" (paying the card bill via net banking) — with
+    wording that matches none of the four confirmed templates. This is exactly the
+    bill-payment/repayment scenario Assumption 11 (§7) anticipated: it correctly falls to
+    needs-review (EXT-6) rather than being counted as a transaction, and is *not* added as a
+    fifth `SenderRule` — paying your own card bill isn't new spend or income.
 - ~~Very large historical backfill (years of email)~~ — **largely moot per ADR-0011:** the
   initial backfill only covers from the start of the current calendar month, so this is at most
   a few weeks of email on day one, not years. Revisit only if the user later chooses to run a

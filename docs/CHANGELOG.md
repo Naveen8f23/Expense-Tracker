@@ -8,7 +8,73 @@ versioned releases begin.
 
 ## [Unreleased]
 
+### Fixed
+- **Real HDFC HTML bolds transactional values — extraction regexes didn't tolerate it (found
+  2026-07-19 during the user's own live spot-check, per ADR-0014's requirement that the user
+  verify real results beyond the confirmed samples).** The plain-text quotes in
+  REQUIREMENTS.md Appendix A don't show it, but the actual credit card debit template's HTML
+  wraps the merchant name, amount, card-ending digits, and date/time in `<b>...</b>` tags (e.g.
+  `Credit Card ending <b>2174</b>`) — a plain `\s*`/`\s+` gap between an anchor phrase and its
+  value doesn't match through that. `app/domain/extraction.py` now uses a shared `_GAP` fragment
+  (tolerant of any mix of whitespace and HTML tags) at every such anchor point across all three
+  extractors, not just the one confirmed broken — the UPI templates only use `<br>` between
+  whole fields in production, but hardening them the same way costs nothing and guards against
+  the same bug class if that ever changes. Regression tests added with fabricated (not the
+  user's real) values reproducing the tag-wrapping shape. Verified against the user's own two
+  real, previously-misclassified emails (read-only check, then reprocessed once confirmed) — both
+  now correctly extract; only type and amount were ever displayed, never other fields, per the
+  minimal-disclosure precedent from Epic B's live verification. 89/89 backend tests passing (2
+  new) on macOS and the Ubuntu VM.
+- **Discovered a real fifth HDFC email type, correctly excluded by design, not a bug:** a
+  "Credit Card Payment done using HDFC Bank Online Banking" notification (paying off the card
+  bill via net banking) — distinct wording from all four confirmed templates, so it classifies
+  as no match and lands in needs-review rather than being miscounted as spend. This is exactly
+  the behavior REQUIREMENTS.md §7 Assumption 11 predicted for a bill-payment/repayment
+  confirmation. Not a new `SenderRule` — recorded as a known, deliberately-unmatched email
+  shape in REQUIREMENTS.md Edge Cases §10, since paying your own card bill isn't new spend and
+  must never be counted as one.
+
 ### Added (code)
+- **Epic C (Classification & Extraction) complete (2026-07-19)** — all eight stories (C1–C8):
+  - **C1–C3 (classifiers):** `app/domain/classification.py` — `is_upi_debit`, `is_upi_credit`,
+    `is_credit_card_debit` (pure content-pattern matchers per ADR-0010's confirmed markers) plus
+    `classify()`, which picks the one matching `content_pattern_id` out of the caller-supplied
+    candidates rather than trying all four unconditionally.
+  - **C4–C6 (extractors):** `app/domain/extraction.py` — `extract_upi_debit`,
+    `extract_upi_credit`, `extract_credit_card_debit`, each returning a structured
+    `ExtractedTransaction` or raising `ExtractionError` (never a partial/fabricated result) when
+    a required field can't be found. Handles the confirmed edge cases: absent parenthetical
+    payee display name (UPI debit), absent reference number (credit card debit, dedup falls back
+    to timestamp — DUP-2), differing `Rs.`-prefix spacing, and the credit card template's
+    distinct `DD Mon, YYYY at HH:MM:SS` date/time format vs. the UPI templates' date-only
+    `DD-MM-YY`.
+  - **C7 (needs-review queue mechanics):** `app/application/run_classify_and_extract.py`
+    (`run_classify_and_extract`) — classifies and extracts every `UNPROCESSED` `EmailMessage`;
+    a clean match creates an `AUTO_ACCEPTED` `Transaction` (with `Payee` get-or-created by
+    identifier) and marks the email `MATCHED`; anything that fails to classify or extract is
+    marked `NEEDS_REVIEW` instead of dropped, with the classification result (if any) preserved
+    via a new `email_messages.classified_pattern_id` column (migration `e5aa5f25c7b3`).
+    `get_needs_review_emails` gives Epic E's E5 endpoint a ready-made query. Same
+    not-yet-scheduled pattern as B4's incremental sync — nothing calls this automatically yet.
+  - **C8 (AI fallback interface, stub):** `app/domain/ai_fallback.py` — `AIFallbackClient`
+    protocol + `StubAIFallbackClient`, which always reports "unable to extract," proving the
+    seam (Constitution principle 10) without committing to a provider. A fallback that *did*
+    produce fields would still create a `Transaction`, but always `NEEDS_REVIEW`, never
+    auto-accepted (EXT-4/EXT-5).
+  - All extractors/classifiers tested directly against the real confirmed HDFC samples
+    (REQUIREMENTS.md Appendix A), not synthetic stand-ins, per the Definition of Done. 87/87
+    backend tests passing (34 new) on both macOS and the Ubuntu VM (ADR-0017); the new migration
+    was applied to both the local and VM real databases so the running app stays consistent with
+    the schema, even though this epic needed no live Gmail interaction (classification/extraction
+    are pure functions over already-cached content).
+  - **Noted, not fixed:** classification currently tries every configured
+    `SenderRule.content_pattern_id` against every processed email rather than narrowing by the
+    specific sender an email came from, since `EmailMessage` doesn't record that. Correct today
+    (one sender address hosts all three confirmed patterns); would need revisiting for a second
+    bank/sender. Also noted: `app/domain/classification.py`/`extraction.py` import
+    `PaymentMethod`/`DebitOrCredit` from `app/infrastructure/models.py`, a minor Domain→
+    Infrastructure layering wrinkle inherited from Epic A's enum placement — see
+    [ARCHITECTURE.md](ARCHITECTURE.md) §3 for the full note.
 - **Epic B, B1 (Gmail OAuth connect flow) complete** — `GET /gmail/connect`/`GET /gmail/callback`
   (`app/presentation/gmail_router.py`, `app/application/connect_gmail_account.py`,
   `app/infrastructure/gmail_oauth.py`), using Google's official client libraries (ADR-0018).

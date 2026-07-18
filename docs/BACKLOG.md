@@ -1,8 +1,7 @@
 # Backlog
 
-Status: **v0.3 — Epic A (Foundation) and Epic B (Gmail Ingestion) done and verified
-(2026-07-18); code committed and pushed. Epic C (Classification & Extraction) is next, not yet
-started.**
+Status: **v0.4 — Epic A (Foundation), Epic B (Gmail Ingestion), and Epic C (Classification &
+Extraction) done and verified (2026-07-19). Epic D (Deduplication) is next, not yet started.**
 
 This is the detailed, implementation-level breakdown of [ROADMAP.md](ROADMAP.md) milestones
 M2–M5, into units small enough to pick up and build one at a time. ROADMAP.md stays
@@ -304,83 +303,158 @@ owner's explicit go-ahead before Epic C (Classification & Extraction) begins.
 
 ## Epic C — Classification & Extraction (ROADMAP.md M3)
 
-### C1. Classifier: UPI Debit
+### C1. Classifier: UPI Debit ✅
 **As** the developer, **I want** a function that identifies an email as "UPI Debit" using the
 confirmed content markers, **so that** downstream extraction knows which template to apply.
 
 **Acceptance criteria:**
 - Given the real UPI Debit sample (REQUIREMENTS.md Appendix A.1), correctly classifies as UPI
-  Debit.
-- Given the UPI Credit or Credit Card Debit samples, does **not** misclassify as UPI Debit.
+  Debit. ✅ `is_upi_debit` (`app/domain/classification.py`) matches on the confirmed
+  ADR-0010 marker pair (`"is debited from your account ending"` + `"towards VPA"`).
+- Given the UPI Credit or Credit Card Debit samples, does **not** misclassify as UPI Debit. ✅
 - Given an unrelated email from the same sender, returns "no match" rather than a false
-  positive.
+  positive. ✅ Verified against a synthetic unrelated HDFC email (account-statement notice).
 
 **Depends on:** A2, B2. **Size:** S.
 
-### C2. Classifier: UPI Credit
-Same shape as C1, for the UPI Credit template (Appendix A.2). **Depends on:** A2, B2. **Size:** S.
+### C2. Classifier: UPI Credit ✅
+Same shape as C1, for the UPI Credit template (Appendix A.2) — `is_upi_credit`, matching
+`"has been successfully credited to your HDFC Bank account"`. **Depends on:** A2, B2. **Size:** S.
 
-### C3. Classifier: Credit Card Debit
-Same shape as C1, for the Credit Card Debit template (Appendix A.3). **Depends on:** A2, B2.
+### C3. Classifier: Credit Card Debit ✅
+Same shape as C1, for the Credit Card Debit template (Appendix A.3) — `is_credit_card_debit`,
+matching `"has been debited from your HDFC Bank Credit Card ending"`. **Depends on:** A2, B2.
 **Size:** S.
 
-### C4. Extractor: UPI Debit
+Tests: `backend/tests/test_classification.py` — each of the three real samples classifies
+correctly and doesn't cross-match the other two; also confirms matching survives the email being
+HTML-wrapped (Edge Cases §10) and that `classify()` only ever considers the candidate
+`content_pattern_id`s passed in (sender-then-content, per ADR-0010), not all four unconditionally.
+
+### C4. Extractor: UPI Debit ✅
 **As** the developer, **I want** a parser that turns a classified UPI Debit email into
 structured fields, **so that** it can become a `Transaction` row.
 
 **Acceptance criteria:**
 - From Appendix A.1's sample, correctly extracts: amount 120.00, type debit, method UPI,
-  instrument "account ending 4958", payee VPA + display name, date, reference number.
+  instrument "account ending 4958", payee VPA + display name, date, reference number. ✅
+  `extract_upi_debit` (`app/domain/extraction.py`); the instrument is stored as just the last 4
+  digits (`"4958"`) per EXT-1's literal wording ("the last 4 digits of the account/card
+  instrument"), not the full descriptive phrase.
 - Handles the case where the parenthetical payee display name is absent (Edge Cases §10) —
-  falls back to the VPA alone rather than failing.
-- Output confidence is high (EXT-5) since this is a known, matched template.
+  falls back to the VPA alone rather than failing. ✅
+- Output confidence is high (EXT-5) since this is a known, matched template. ✅
+  `ExtractedTransaction.confidence_score` defaults to `1.0`.
 
 **Depends on:** C1, A2. **Size:** M.
 
-### C5. Extractor: UPI Credit
+### C5. Extractor: UPI Credit ✅
 Same shape as C4, for the UPI Credit template (Appendix A.2) — including the "Sender" name +
-VPA fields and the lettered "Transaction Details" layout. **Depends on:** C2, A2. **Size:** M.
+VPA fields and the lettered "Transaction Details" layout (`extract_upi_credit`). **Depends on:**
+C2, A2. **Size:** M.
 
-### C6. Extractor: Credit Card Debit
-Same shape as C4, for the Credit Card Debit template (Appendix A.3).
+### C6. Extractor: Credit Card Debit ✅
+Same shape as C4, for the Credit Card Debit template (Appendix A.3) — `extract_credit_card_debit`.
 
 **Additional acceptance criteria specific to this story:**
 - Correctly parses the `18 Jul, 2026 at 18:56:45` date/time format (distinct from the UPI
-  templates' `DD-MM-YY`).
+  templates' `DD-MM-YY`). ✅
 - Handles the **absence** of a reference number (confirmed gap in this template) without
-  erroring — the field is stored as null, not a crash or a fabricated value.
+  erroring — the field is stored as null, not a crash or a fabricated value. ✅
 - Handles the `Rs. 554.00` (space after `Rs.`) vs. `Rs.120.00` (no space) formatting difference
-  between templates.
+  between templates. ✅ Single shared amount regex (`Rs\.\s*...`) tolerates both.
 
 **Depends on:** C3, A2. **Size:** M.
 
-### C7. Needs-review queue mechanics
+Tests: `backend/tests/test_extraction.py` — all three real samples extract every field correctly;
+the missing-display-name and missing-reference-number edge cases; both `Rs.`-spacing variants;
+and each extractor raises `ExtractionError` (not a crash, not a guess) when a required field is
+missing from otherwise-classified content.
+
+### C7. Needs-review queue mechanics ✅
 **As** the owner-operator, **I want** any email that doesn't classify or extract cleanly to be
 flagged for my review instead of silently dropped or guessed at, **so that** nothing important
 goes missing (EXT-5, EXT-6).
 
 **Acceptance criteria:**
 - An `email_messages` row that matches no known `SenderRule` content pattern is marked
-  `needs-review`, not `ignored` or deleted, if it came from a configured sender address.
+  `needs-review`, not `ignored` or deleted, if it came from a configured sender address. ✅
+  `run_classify_and_extract` (`app/application/run_classify_and_extract.py`) — every stored
+  `EmailMessage` already came from a configured sender address by construction (B3/B4's
+  ingestion-time sender filtering), so this applies to every row it processes.
 - An email that classifies but fails extraction (e.g. unexpected internal structure) is also
-  marked `needs-review`, with the classification result preserved for context.
-- A queryable list of needs-review items exists (surfaced properly in Epic E/F).
+  marked `needs-review`, with the classification result preserved for context. ✅ A new
+  `email_messages.classified_pattern_id` column (migration `e5aa5f25c7b3`) is set as soon as
+  classification succeeds, independent of whether extraction then succeeds.
+- A queryable list of needs-review items exists (surfaced properly in Epic E/F). ✅
+  `get_needs_review_emails` — a dedicated read helper was added (unlike B5's `sync_state`, which
+  reused plain ORM queries) since Epic E's E5 endpoint will want exactly this query.
 
 **Depends on:** C1–C6. **Size:** M.
 
-### C8. AI fallback interface (stub)
+Tests: `backend/tests/test_run_classify_and_extract.py` — unrecognized-content and
+classifies-but-unparseable-content both land in `needs_review` (with `classified_pattern_id`
+preserved only in the latter case); a real sample creates an `AUTO_ACCEPTED` `Transaction` with
+its `Payee` correctly get-or-created (reused across two transactions for the same identifier);
+a successful AI-fallback result still lands as a `NEEDS_REVIEW` transaction, never auto-accepted;
+and re-running against already-`MATCHED`/`NEEDS_REVIEW` emails is a no-op (previews Epic D's D1).
+
+### C8. AI fallback interface (stub) ✅
 **As** the developer, **I want** a defined `AIFallbackClient` interface with a no-op/stub
 implementation, **so that** the extraction module has a clean seam for a real AI fallback
 later without being blocked on choosing a provider now (Constitution principle 10).
 
 **Acceptance criteria:**
 - Interface is defined (input: raw email content + sender; output: best-effort structured
-  fields + confidence, or "unable to extract").
+  fields + confidence, or "unable to extract"). ✅ `AIFallbackClient` (`app/domain/ai_fallback.py`)
+  — a `Protocol`, not an ABC, matching the rest of the codebase's lightweight-interface style.
 - Stub implementation always returns "unable to extract," which routes the email to the
-  needs-review queue (C7) — this proves the seam works without committing to a provider.
+  needs-review queue (C7) — this proves the seam works without committing to a provider. ✅
+  `StubAIFallbackClient.extract` always returns `None`; wired as `run_classify_and_extract`'s
+  default so nothing needs to pass it explicitly yet.
 - Swapping in a real implementation later requires no changes outside the Infrastructure layer.
+  ✅ `run_classify_and_extract` depends only on the `AIFallbackClient` protocol, never on
+  `StubAIFallbackClient` directly except as its own default value.
 
 **Depends on:** C7. **Size:** S.
+
+Tests: `backend/tests/test_ai_fallback.py`.
+
+---
+
+## Epic C — Status: Done (2026-07-19)
+
+All eight stories (C1–C8) complete, tested (89/89 backend tests passing on macOS and the Ubuntu
+VM per ADR-0017 — 36 new tests added), and run against the real confirmed HDFC samples
+(REQUIREMENTS.md Appendix A) rather than synthetic stand-ins, per the Definition of Done.
+
+**Bug found and fixed during the user's own live verification** (they made a real ₹10 UPI
+transaction and separately confirmed 2 previously-backfilled real emails, per ADR-0014's
+requirement that the user spot-check real results beyond the confirmed samples): the credit card
+debit template's real HTML bolds its values (`Credit Card ending <b>2174</b>`), which the
+extraction regexes didn't tolerate — 2 of the user's 6 originally-backfilled real emails failed
+extraction and landed in needs-review as a result. Fixed by making all three extractors tolerate
+HTML tags between an anchor phrase and its value, not just whitespace (`app/domain/extraction.py`
+`_GAP`), with regression tests using fabricated values reproducing the shape. Verified against
+the user's own real data: both previously-failed emails, and the new real ₹10 UPI debit + ₹10 UPI
+credit transaction, now parse correctly — confirmed by reporting *only* type and amount back to
+the user, per the same minimal-disclosure precedent as Epic B's live verification.
+
+**Also discovered (not a bug):** a real 5th HDFC email shape — a credit card bill payment made
+via net banking — correctly falls to needs-review rather than being counted as a transaction,
+exactly matching REQUIREMENTS.md §7 Assumption 11's prediction. See REQUIREMENTS.md Edge Cases
+§10 and CHANGELOG.md for the full record.
+
+Per the epic-checkpoint policy (ADR-0014), this is the point for a demo and the owner's explicit
+go-ahead before Epic D (Deduplication) begins. Not yet committed to git — same as Epic B, this is
+meant to be committed as one whole once epic-level verification is confirmed by the user.
+
+**Scope note:** classification currently considers every configured `SenderRule.content_pattern_id`
+as a candidate for every processed email, rather than narrowing to the specific sender address an
+email came from — correct today since exactly one sender address (`alerts@hdfcbank.bank.in`)
+exists, but `EmailMessage` doesn't itself record which sender address a message came from. If a
+second bank/sender is added later (REQUIREMENTS.md §9), this will need revisiting so classification
+narrows candidates per-message rather than trying every known bank's patterns against every email.
 
 ---
 

@@ -1,11 +1,11 @@
 # Architecture
 
-Status: **populated (v0.5) — initial system design laid out; Epic A (Foundation) and Epic B
-(Gmail Ingestion) built and verified, both on macOS and the Ubuntu deployment VM, and Epic B
-against the owner's real Gmail account.** Technology stack confirmed (ADR-0013); encryption
-approach revised for cross-platform reliability (ADR-0015: application-level field encryption,
-not SQLCipher). Google's official client libraries added for Gmail OAuth/API access (ADR-0018).
-Detailed build backlog tracked in [BACKLOG.md](BACKLOG.md).
+Status: **populated (v0.6) — Epic A (Foundation), Epic B (Gmail Ingestion), and Epic C
+(Classification & Extraction) built and verified, both on macOS and the Ubuntu deployment VM;
+Epic B additionally against the owner's real Gmail account.** Technology stack confirmed
+(ADR-0013); encryption approach revised for cross-platform reliability (ADR-0015:
+application-level field encryption, not SQLCipher). Google's official client libraries added for
+Gmail OAuth/API access (ADR-0018). Detailed build backlog tracked in [BACKLOG.md](BACKLOG.md).
 
 This document describes the current state of the system's architecture. It should always
 reflect what *is*, not what's planned (that belongs in [ROADMAP.md](ROADMAP.md)) or why a
@@ -82,6 +82,20 @@ monolith, per the original design directive to stay plug-and-play.
 | Infrastructure | `GmailClient` (Gmail OAuth + History API), `TransactionRepository` (database), `AIFallbackClient` (rare-case AI extraction) — each a concrete implementation of a Domain/Application-defined interface | Application, Domain (via interfaces) | — |
 | Presentation | API Layer (REST/JSON endpoints) and the Web Dashboard (consumes the API only, never talks to Infrastructure directly) | Application | Infrastructure internals |
 
+**Noted deviation (Epic C, 2026-07-19):** the vocabulary enums (`TransactionType`,
+`PaymentMethod`, `DebitOrCredit`, `EmailMessageStatus`, `ReviewStatus`) live in
+`app/infrastructure/models.py` (Epic A's choice, so SQLAlchemy's `Enum` column type can reference
+them directly) rather than in Domain. `app/domain/classification.py` and
+`app/domain/extraction.py` import `PaymentMethod`/`DebitOrCredit` from there, which technically
+makes Domain depend on Infrastructure — these are plain, framework-free `str, enum.Enum` classes
+with no SQLAlchemy/Gmail/FastAPI coupling of their own, so nothing about the *actual* forbidden
+dependencies (Gmail API, the database engine, the web framework) is pulled in, but the import
+still crosses the layer boundary as drawn. Flagged here rather than silently introduced; not
+fixed now since duplicating the same four enums into a new `app/domain` module would violate
+"one source of truth per fact" (Constitution principle 26) for no behavior change. Revisit (move
+the enums to Domain and have `models.py` import them back) if this pairing starts to feel like a
+real problem rather than a naming wrinkle.
+
 Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
 
 - **Ingestion** (`GmailClient` + `SyncScheduler`) — ING-1 through ING-8. **Epic B complete
@@ -101,12 +115,30 @@ Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
     carries start time and scanned/matched/skipped/failed counts (migration `96b145d41d66`).
   - **Not yet built:** the `SyncScheduler` itself — nothing calls `run_incremental_sync`
     automatically yet; explicitly deferred until Epic C gives newly-synced emails somewhere to
-    go (BACKLOG.md B4).
-- **Classification** (`SenderRule` matching — see Appendix A in REQUIREMENTS.md) — ING-3a.
+    go (BACKLOG.md B4). Epic C now exists (below), but a scheduler still isn't built — deferred
+    further until there's a concrete reason to run sync unattended, per Constitution principle 2.
+- **Classification** (`SenderRule` matching — see Appendix A in REQUIREMENTS.md) — ING-3a. **Epic
+  C complete (2026-07-19):** `app/domain/classification.py` — pure content-pattern matchers
+  (`is_upi_debit`, `is_upi_credit`, `is_credit_card_debit`) plus `classify()`, which picks the one
+  matching `content_pattern_id` out of the candidates a caller passes in (sender-then-content,
+  ADR-0010). No database or Gmail dependency — a true Domain-layer module.
 - **Extraction** (`Extractor`, per-type fixed parsers + `AIFallbackClient`) — EXT-1 through EXT-7.
-- **Deduplication** (`Deduplicator`) — DUP-1, DUP-2.
+  **Epic C complete:** `app/domain/extraction.py` (`extract_upi_debit`, `extract_upi_credit`,
+  `extract_credit_card_debit`, each returning an `ExtractedTransaction` or raising
+  `ExtractionError`) and `app/domain/ai_fallback.py` (`AIFallbackClient` protocol +
+  `StubAIFallbackClient`, always "unable to extract" — C8). Orchestrated by
+  `app/application/run_classify_and_extract.py` (`run_classify_and_extract`), which processes
+  every `UNPROCESSED` `EmailMessage`: classify → extract → create a `Transaction` (auto-accepted
+  on a clean fixed-rule match; flagged `NEEDS_REVIEW` if only the AI fallback produced it) →
+  mark the email `MATCHED`, or mark it `NEEDS_REVIEW` if nothing could extract it at all (EXT-6).
+  Nothing calls this automatically yet, same explicit-deferral reasoning as the `SyncScheduler`
+  above.
+- **Deduplication** (`Deduplicator`) — DUP-1, DUP-2. Not yet built (Epic D, next).
 - **Storage** (`TransactionRepository` and friends) — the single source of truth on disk.
 - **Review Queue** — a query/view over Storage for needs-review items, not a separate store.
+  **Epic C complete:** `run_classify_and_extract.get_needs_review_emails` — a dedicated read
+  helper (unlike B5's `sync_state`, which reused plain ORM queries directly) since Epic E's E5
+  endpoint will want exactly this query shape.
 - **Categorization** — mostly a thin module: remembers the last category a user assigned per
   Payee (COR-2); no AI/inference in MVP (EXT-2).
 - **Correction** (`CorrectTransaction` use case) — COR-1 through COR-5.
@@ -142,8 +174,10 @@ Tables map directly to [REQUIREMENTS.md](REQUIREMENTS.md) §5 Data Model:
 - `gmail_connections` — OAuth tokens (**encrypted column**, ADR-0015), one per connected mailbox.
 - `sender_rules` — sender address + content-matching pattern → transaction type (ADR-0010).
 - `email_messages` — Gmail message ID, thread ID, received timestamp, processing status,
-  **cached content (encrypted column, ADR-0012/ADR-0015)**, and a pointer to the transaction it
-  produced (if any).
+  **cached content (encrypted column, ADR-0012/ADR-0015)**, the `content_pattern_id`
+  classification matched (if any — nullable; added Epic C, migration `e5aa5f25c7b3`, so a
+  needs-review item that classified but then failed extraction keeps that context), and a
+  pointer to the transaction it produced (if any).
 - `sync_state` — per-connection checkpoint (last `historyId`, last sync started/completed time,
   last error) plus, since B5, the last run's scanned/matched/skipped/failed message counts
   (ING-8) — a dedicated API endpoint for reading this is Epic E's E7, not yet built.
@@ -234,8 +268,15 @@ considered and explicitly dropped (ADR-0009) — not an integration in this syst
 
 ## 8. Known Limitations / Technical Debt
 
-- Epics A and B (Foundation, Gmail Ingestion) built and verified (BACKLOG.md); Epic C
-  (Classification & Extraction) onward not started.
+- Epics A, B, and C (Foundation, Gmail Ingestion, Classification & Extraction) built and verified
+  (BACKLOG.md); Epic D (Deduplication) onward not started.
+- **Classification doesn't yet narrow candidates by the specific sender an email came from** —
+  `run_classify_and_extract` tries every configured `SenderRule.content_pattern_id` against every
+  processed email, since `EmailMessage` doesn't record which sender address produced it. Correct
+  today (exactly one sender address, `alerts@hdfcbank.bank.in`, hosts all three confirmed
+  patterns), but will need revisiting if a second bank/sender is added (REQUIREMENTS.md §9).
+- No `Category` is ever assigned automatically (EXT-2, by design) — every Epic C-created
+  `Transaction` has `category_id = NULL` until a user assigns one (Epic F).
 - Encryption at rest is **field-level, not whole-database** (ADR-0015) — transaction data
   itself relies on OS-level disk encryption if the user wants that layer protected too; this is
   a real, accepted limitation, not an oversight (see REQUIREMENTS.md §4 NFR Security).
