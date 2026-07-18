@@ -1,11 +1,12 @@
 # Architecture
 
-Status: **populated (v0.6) — Epic A (Foundation), Epic B (Gmail Ingestion), and Epic C
-(Classification & Extraction) built and verified, both on macOS and the Ubuntu deployment VM;
-Epic B additionally against the owner's real Gmail account.** Technology stack confirmed
-(ADR-0013); encryption approach revised for cross-platform reliability (ADR-0015:
-application-level field encryption, not SQLCipher). Google's official client libraries added for
-Gmail OAuth/API access (ADR-0018). Detailed build backlog tracked in [BACKLOG.md](BACKLOG.md).
+Status: **populated (v0.7) — Epic A (Foundation), Epic B (Gmail Ingestion), Epic C
+(Classification & Extraction), and Epic D (Deduplication) built and verified, both on macOS and
+the Ubuntu deployment VM; Epics B and C additionally against the owner's real Gmail account.**
+Technology stack confirmed (ADR-0013); encryption approach revised for cross-platform reliability
+(ADR-0015: application-level field encryption, not SQLCipher). Google's official client libraries
+added for Gmail OAuth/API access (ADR-0018). Detailed build backlog tracked in
+[BACKLOG.md](BACKLOG.md).
 
 This document describes the current state of the system's architecture. It should always
 reflect what *is*, not what's planned (that belongs in [ROADMAP.md](ROADMAP.md)) or why a
@@ -133,7 +134,16 @@ Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
   mark the email `MATCHED`, or mark it `NEEDS_REVIEW` if nothing could extract it at all (EXT-6).
   Nothing calls this automatically yet, same explicit-deferral reasoning as the `SyncScheduler`
   above.
-- **Deduplication** (`Deduplicator`) — DUP-1, DUP-2. Not yet built (Epic D, next).
+- **Deduplication** — DUP-1, DUP-2. **Epic D complete (2026-07-19), no new code:** both
+  guarantees already existed by construction from earlier epics — `email_messages.message_id` and
+  `transactions.email_message_id` are both `unique` (A2), and `run_classify_and_extract` only
+  ever processes `UNPROCESSED` emails (C7), so an already-handled message can't be reprocessed.
+  There is no content-based (amount/payee/day) matching step anywhere, by design (ADR-0009), so
+  two genuinely separate transactions that happen to share those fields are never at risk of
+  being merged — there's nothing that would ever compare them in the first place. No dedicated
+  `Deduplicator` component was added: it would have had no logic to hold, and Constitution
+  principle 2 (avoid unnecessary abstraction) argues against building one anyway. Confirmed by
+  `backend/tests/test_deduplication.py`, not by new production code.
 - **Storage** (`TransactionRepository` and friends) — the single source of truth on disk.
 - **Review Queue** — a query/view over Storage for needs-review items, not a separate store.
   **Epic C complete:** `run_classify_and_extract.get_needs_review_emails` — a dedicated read
@@ -268,8 +278,8 @@ considered and explicitly dropped (ADR-0009) — not an integration in this syst
 
 ## 8. Known Limitations / Technical Debt
 
-- Epics A, B, and C (Foundation, Gmail Ingestion, Classification & Extraction) built and verified
-  (BACKLOG.md); Epic D (Deduplication) onward not started.
+- Epics A, B, C, and D (Foundation, Gmail Ingestion, Classification & Extraction, Deduplication)
+  built and verified (BACKLOG.md); Epic E (API Layer) onward not started.
 - **Classification doesn't yet narrow candidates by the specific sender an email came from** —
   `run_classify_and_extract` tries every configured `SenderRule.content_pattern_id` against every
   processed email, since `EmailMessage` doesn't record which sender address produced it. Correct

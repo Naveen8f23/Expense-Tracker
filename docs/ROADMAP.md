@@ -73,11 +73,13 @@ Copy this block per milestone:
 - **Success criteria:** Each of the four email types extracts correctly via its fixed rule, or
   is flagged for review rather than silently wrong (EXT-6); no duplicate or double-counted
   transactions (DUP-1, DUP-2).
-- **Dependencies:** M2. **Progress (2026-07-19):** the Extraction half is done via BACKLOG.md
-  Epic C (C1–C8) — three of the four templates classify and extract correctly (the fourth,
-  credit card credit, is still blocked on a real sample, REQUIREMENTS.md §8); needs-review
-  routing (EXT-6) and the AI-fallback seam are in place. The Deduplication half (Epic D, DUP-1/
-  DUP-2) has not started.
+- **Dependencies:** M2. **Progress (2026-07-19):** both halves are now done. Extraction (Epic C,
+  C1–C8) — three of the four templates classify and extract correctly (the fourth, credit card
+  credit, is still blocked on a real sample, REQUIREMENTS.md §8); needs-review routing (EXT-6)
+  and the AI-fallback seam are in place. Deduplication (Epic D, DUP-1/DUP-2) — both guarantees
+  turned out to already be structural (unique constraints + status-gated reprocessing), confirmed
+  by tests rather than new code. **M3 is effectively complete for the three confirmed templates**;
+  fully closing it out is blocked only on the pending 4th template sample.
 
 ### M4: Review, Correction & Traceability
 - **Status:** Planned

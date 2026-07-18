@@ -8,6 +8,21 @@ versioned releases begin.
 
 ## [Unreleased]
 
+### Added (code)
+- **Epic D (Deduplication) complete (2026-07-19), no new production code** — DUP-1 (message-ID
+  based duplicate detection) and DUP-2 (reference-number/timestamp disambiguation of genuinely
+  repeated transactions) were both already guaranteed by constraints introduced in earlier epics:
+  `email_messages.message_id` and `transactions.email_message_id` are both `unique` (A2), and
+  `run_classify_and_extract` only processes `UNPROCESSED` emails (C7), so an already-handled
+  message is never reprocessed. There is no content-based (amount/payee/day) matching step
+  anywhere by design (ADR-0009), so two genuinely separate transactions sharing those fields are
+  never at risk of being merged. `backend/tests/test_deduplication.py` (4 new tests) confirms
+  this end-to-end rather than trusting the architecture on faith — including a same-day/amount/
+  payee/exact-timestamp coincidence for the credit card debit template (no reference number),
+  proving disambiguation is by Gmail message ID, never by comparing transaction content across
+  messages. No dedicated `Deduplicator` component was added, since it would have had no logic to
+  hold (Constitution principle 2). 93/93 backend tests passing on macOS and the Ubuntu VM.
+
 ### Fixed
 - **Real HDFC HTML bolds transactional values — extraction regexes didn't tolerate it (found
   2026-07-19 during the user's own live spot-check, per ADR-0014's requirement that the user
