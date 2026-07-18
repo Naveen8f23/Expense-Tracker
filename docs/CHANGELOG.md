@@ -1,0 +1,131 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once
+versioned releases begin.
+
+## [Unreleased]
+
+### Added (code)
+- **Epic A (Foundation) complete** — first real application code, per `docs/BACKLOG.md`:
+  - `backend/`: FastAPI app in a layered structure (domain/application/infrastructure/
+    presentation), `GET /health` endpoint, CORS enabled for the dashboard's origin.
+  - Database: SQLAlchemy models for all 9 core tables, Alembic migration applied; `tokens` and
+    `content` columns encrypted at the application level (`cryptography`/Fernet, ADR-0015);
+    verified by reading the raw SQLite file directly and confirming those two fields are not
+    human-readable while ordinary columns are.
+  - `frontend/`: React + Vite + TypeScript dashboard scaffold with a thin `api/client.ts`
+    module as the only place that calls the backend.
+  - `scripts/setup.py` and `scripts/dev.py`: one-time environment setup and a single command
+    to run backend + frontend together, using only cross-platform Python (no shell-specific
+    scripting) per the macOS-dev/Ubuntu-deploy requirement (ADR-0015).
+  - All automated tests pass (5/5); the health check and dashboard were verified live via
+    browser automation, not just tests. Custom ports and `DATABASE_PATH` verified configurable.
+    `python3 scripts/setup.py` then `python3 scripts/dev.py` is the full local run path.
+- Git repository initialized (no commits made yet — left for the user to commit when ready);
+  `.gitignore` added so `backend/data/` (the encryption key and local database) is never
+  committed.
+
+### Added
+- Engineering foundation established under `/docs`: `CONSTITUTION.md`, `REQUIREMENTS.md`,
+  `ARCHITECTURE.md`, `ROADMAP.md`, `DECISIONS.md`, and this `CHANGELOG.md`. See
+  [DECISIONS.md](DECISIONS.md) ADR-0001.
+- Product specification for the Gmail-driven expense tracker: `REQUIREMENTS.md` populated with
+  functional/non-functional requirements, data model, assumptions, edge cases, deferred
+  features, and an MVP definition. `ROADMAP.md` populated with milestones M1–M8. Three
+  foundational product decisions recorded: local-first deployment, web-dashboard-first with a
+  later mobile client, and INR-only MVP currency scope. See [DECISIONS.md](DECISIONS.md)
+  ADR-0002, ADR-0003, ADR-0004.
+
+### Changed
+- Narrowed email-ingestion scope: for known e-commerce/food-delivery vendors, only the
+  order-confirmation email is ingested (payment/delivery emails from those vendors excluded);
+  bank/card/UPI alerts remain the source for other spend. See ADR-0005.
+- Deferred phishing/prompt-injection hardening of the extraction pipeline to a later phase;
+  accepted as a v1 risk. See ADR-0006.
+- All 8 working assumptions in `REQUIREMENTS.md` §7 confirmed by the user; `REQUIREMENTS.md`
+  §11 (Suggested Improvements) marked deferred, not adopted for MVP.
+- Both blocking open questions resolved: extraction is deterministic-first with AI only as a
+  rare fallback (ADR-0007); bank/card alerts matching an already-covered known vendor are
+  excluded at ingestion to prevent double-counting against the vendor's order-confirmation
+  email (ADR-0008).
+- **Major scope simplification:** ingestion narrowed to exactly four fixed bank/UPI
+  transaction-notification email types (UPI debit, UPI credit, credit card debit, credit card
+  credit); all third-party vendor-email tracking (Amazon, Flipkart, Swiggy, Zomato, etc.)
+  dropped entirely. Supersedes ADR-0005 and ADR-0008. See [DECISIONS.md](DECISIONS.md)
+  ADR-0009.
+- Sync health visibility (ING-8) and the unrecognized/unparseable-email review queue (EXT-6)
+  promoted from suggested improvements to confirmed core MVP requirements.
+- Category assignment resolved as fully user-defined/manual for MVP; auto-suggesting a
+  category from email content noted as a post-MVP roadmap idea (see `ROADMAP.md` M6).
+- Cancelled/failed-transaction handling question resolved as not applicable — there is no
+  "order" concept left to cancel now that only settled bank/UPI debits and credits are
+  ingested.
+- Spending-coverage question resolved: the four email types capture the large majority of the
+  user's spending; small/occasional exceptions (e.g. cash) are an accepted minor gap, handled
+  by the existing manual add-transaction escape hatch rather than a dedicated feature
+  (`REQUIREMENTS.md` §7 Assumption 9).
+- Three of the four email templates confirmed against real HDFC samples (UPI debit, UPI credit,
+  credit card debit); recorded as `REQUIREMENTS.md` Appendix A. Discovered that all three share
+  one sender address (`alerts@hdfcbank.bank.in`), so classification needs a content-pattern
+  match in addition to the sender check — recorded as [DECISIONS.md](DECISIONS.md) ADR-0010,
+  which refines `SenderRule` (§5 Data Model) and ING-3. Also discovered: HDFC's credit card
+  debit template has no reference number (dedup falls back to timestamp, DUP-2) and uses a
+  cryptic merchant descriptor (e.g. `ASSPL`) rather than a friendly name; date/time format
+  differs between UPI and credit card templates. The fourth template (credit card credit) is
+  still pending from the user.
+- **All remaining open questions resolved except the pending 4th template:**
+  - Initial backfill starts from the first day of the current calendar month at setup time, not
+    a rolling historical window (see [DECISIONS.md](DECISIONS.md) ADR-0011).
+  - Source email content is cached locally at ingestion time for robust traceability (ADR-0012).
+  - No export/API needed near-term (dashboard is sufficient), but the backend/API boundary must
+    still be designed so a future mobile app is a clean additional client (reaffirms ADR-0003).
+  - HDFC confirmed as the user's sole bank/card issuer for now (`REQUIREMENTS.md` §7
+    Assumption 10); the `SenderRule` design must stay extensible to a second bank later.
+  - "Credit card credit" confirmed to primarily mean a merchant refund, not a bill-payment/
+    repayment confirmation (`REQUIREMENTS.md` §7 Assumption 11).
+- `ARCHITECTURE.md` populated (v0.1): system overview/diagram, module boundaries (Ingestion,
+  Classification, Extraction, Deduplication, Storage, Review Queue, Categorization,
+  Correction, Analytics, API Layer, Web Dashboard), data storage schema outline, external
+  integration isolation boundaries, cross-cutting concerns, and testing strategy.
+- Technology stack recorded and **confirmed by the user**: Python/FastAPI backend, encrypted
+  SQLite, React/Vite dashboard, in-process scheduler, pluggable AI-fallback interface. See
+  [DECISIONS.md](DECISIONS.md) ADR-0013 (status: Accepted).
+- New doc `BACKLOG.md` added: the MVP build plan (ROADMAP.md M2–M5) broken into ~30 independent,
+  SCRUM-style stories across 8 epics (Foundation, Gmail Ingestion, Classification & Extraction,
+  Deduplication, API Layer, Dashboard Review/Correction, Search & Analytics, Cross-cutting
+  polish), each with acceptance criteria and explicit dependencies. `ROADMAP.md` updated to
+  point to it instead of describing implementation tasks itself.
+- Verification policy defined and added to `BACKLOG.md` ("Definition of Done") and
+  `ARCHITECTURE.md` §7: automated tests (run for real, against the confirmed sample emails) for
+  backend/logic stories; direct browser-driven checks for dashboard stories; user-gated live
+  testing for the Gmail OAuth consent step and the first real backfill; a demo + explicit
+  go-ahead required at the end of each epic before the next begins. See
+  [DECISIONS.md](DECISIONS.md) ADR-0014.
+
+### Changed
+- **Platform-independence requirement added:** the app must run identically on macOS
+  (development) and Ubuntu (the actual deployment target, an Ubuntu VM). Discovered that
+  SQLCipher (the presumed whole-database encryption approach) fails to install even on the
+  development machine — a real cross-platform native-dependency risk, not just theoretical.
+- **Encryption approach revised:** "encrypted at rest" is now implemented as application-level
+  encryption (via the `cryptography` package) of only the genuinely sensitive fields — Gmail
+  OAuth tokens and cached raw email content. Transaction fields (amount, date, payee, category)
+  are stored unencrypted; their protection depends on the host OS's own disk encryption, not a
+  guarantee the app makes. `REQUIREMENTS.md` §4, `ARCHITECTURE.md` §4/§8, and `BACKLOG.md`
+  stories A2/H1 updated accordingly. See [DECISIONS.md](DECISIONS.md) ADR-0015.
+- Migration tooling decided: Alembic (pairs with SQLAlchemy, pure Python, no native dependency).
+
+<!--
+When cutting a release, move entries from [Unreleased] into a new dated section, e.g.:
+
+## [0.1.0] - YYYY-MM-DD
+### Added
+### Changed
+### Deprecated
+### Removed
+### Fixed
+### Security
+-->

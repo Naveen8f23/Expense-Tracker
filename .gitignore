@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+
+# Backend runtime data — never commit real tokens, encryption keys, or the local DB
+backend/data/
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+
+# OS
+.DS_Store
+
+# Claude Code local tool settings (per-machine, not project source)
+.claude/settings.local.json
