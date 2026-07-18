@@ -159,6 +159,8 @@ considered and explicitly dropped (ADR-0009) — not an integration in this syst
   which are already user-scoped (§9 of REQUIREMENTS.md).
 - **Configuration management:** `SenderRule` entries (sender address + content pattern per
   type), database location, and API/dashboard ports are the main configuration surface for v1.
+  The `scripts/vm_*.py` verification tooling (§7, ADR-0017) adds its own small surface —
+  `VM_HOST`, `VM_REMOTE_DIR` — plus reuses `BACKEND_PORT`/`FRONTEND_PORT` from `scripts/dev.py`.
 - **Process shutdown:** the dev-run script (`scripts/dev.py`) explicitly registers handlers for
   both SIGINT (Ctrl+C) and SIGTERM, rather than relying on Python's default Ctrl+C behavior.
   This was a deliberate fix during Epic A: a shell backgrounding a process sets SIGINT to be
@@ -185,6 +187,29 @@ considered and explicitly dropped (ADR-0009) — not an integration in this syst
   extraction rules hold against the real inbox — beyond the confirmed samples — requires the
   user to spot-check a handful of real results after the first backfill. See
   [BACKLOG.md](BACKLOG.md) "Definition of Done" for how this fits into each story/epic.
+- **Verification runs against the Ubuntu VM, not just macOS (ADR-0017):** macOS is fine for the
+  fast local dev/edit loop, but a story or epic isn't considered verified until it's been run on
+  the actual Ubuntu deployment target, since real divergence between the two has already
+  surfaced once (ADR-0016). Four scripts under `scripts/` (stdlib-only, matching
+  `setup.py`/`dev.py`) make this a single command instead of repeated manual steps:
+  - `scripts/vm_test.py` — syncs the source tree to the VM and runs the backend automated test
+    suite there. This is the real gate for Epics A–E's "automated tests exist and pass"
+    Definition-of-Done criterion (BACKLOG.md) — a macOS-only pass is necessary but not
+    sufficient.
+  - `scripts/vm_dev.py` (`start`/`stop`) — syncs, (re)starts the backend + frontend dev servers
+    on the VM, and opens the SSH tunnel (below) so the dashboard can be driven directly for
+    Epics F–G's browser-automation verification, same as it would be against a local instance.
+  - `scripts/vm_tunnel.py` (`start`/`stop`) — the SSH port-forward on its own, for when the
+    servers are already running and only the tunnel needs to be (re)established.
+  - `scripts/vm_sync.py` — the rsync step alone; the other three call it internally. Excludes
+    are derived from `.gitignore` rather than a second hand-maintained list, so venvs,
+    `node_modules`, and the local encryption key/database can't silently drift into being synced
+    (or silently stop being synced) as `.gitignore` evolves.
+  - **Why a tunnel, not direct access:** the VM sits on a Tailscale network whose ACLs appear to
+    permit only SSH between nodes — direct connections to the app's own ports (5173/8000) time
+    out even though `ping` and `ssh` both succeed and the VM's own firewall (`ufw`) is inactive.
+    The tunnel rides over the already-permitted SSH connection instead. Configurable via
+    `VM_HOST`/`VM_REMOTE_DIR`/`BACKEND_PORT`/`FRONTEND_PORT` env vars (see `scripts/_vm.py`).
 
 ## 8. Known Limitations / Technical Debt
 
@@ -196,9 +221,14 @@ considered and explicitly dropped (ADR-0009) — not an integration in this syst
   no second bank is implemented.
 - No OCR/attachment handling; not needed for the confirmed HDFC templates (plain-text body).
 - Development happens on macOS (Apple Silicon); the actual deployment target is an Ubuntu VM
-  (ADR-0015). Verified so far only on macOS — the Ubuntu path (e.g. `apt`-based Node/Python
-  availability, systemd service setup) has not yet been exercised for real and should be
-  checked once the app is ready to move there.
+  (ADR-0015). **Verified 2026-07-18:** Epic A runs end-to-end on the Ubuntu 26.04 LTS deployment
+  VM — `scripts/setup.py` (venv creation, pip install, Alembic migration, `npm install`) and
+  `scripts/dev.py` (backend + frontend dev servers, CORS) both work, and all 5 backend tests pass
+  (including the raw-file encryption check). This required bumping `sqlalchemy`/`alembic` to
+  newer 2.0.x/1.x patch releases for Python 3.14 compatibility, since Ubuntu 26.04 ships only
+  Python 3.14 with no older version available via its repos or a PPA (ADR-0016). Not yet
+  exercised: systemd-managed service setup (still run via `scripts/dev.py` directly, as on
+  macOS) and the live Gmail OAuth flow (Epic B).
 - The FastAPI app does not yet touch the database at all (no lifespan hook creates tables or
   runs migrations automatically) — schema setup currently only happens via running
   `alembic upgrade head` directly (through `scripts/setup.py`). This is expected to remain the

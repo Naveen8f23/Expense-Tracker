@@ -1,6 +1,7 @@
 # Backlog
 
-Status: **populated (v0.1) — MVP backlog broken into independent, SCRUM-style stories.**
+Status: **v0.2 — Epic A (Foundation) done and verified (2026-07-18); code committed and
+pushed. Epic B (Gmail Ingestion) is next, not yet started.**
 
 This is the detailed, implementation-level breakdown of [ROADMAP.md](ROADMAP.md) milestones
 M2–M5, into units small enough to pick up and build one at a time. ROADMAP.md stays
@@ -27,7 +28,7 @@ commitment).
   discovered mid-build into [REQUIREMENTS.md](REQUIREMENTS.md) §12 rather than letting them
   balloon this backlog silently.
 
-## Definition of Done (confirmed 2026-07-18, ADR-0014)
+## Definition of Done (confirmed 2026-07-18, ADR-0014; revised 2026-07-18, ADR-0017)
 
 A story is not done just because code was written for it. It's done when:
 
@@ -36,10 +37,14 @@ A story is not done just because code was written for it. It's done when:
 2. **Automated tests exist and pass**, run for real (not just written) — this applies fully to
    Epics A–E (backend/logic): schema, classifiers, extractors, dedup, API endpoints. These are
    deterministic and get tested directly against the real sample emails in REQUIREMENTS.md
-   Appendix A plus the known edge cases.
+   Appendix A plus the known edge cases. **Run via `python3 scripts/vm_test.py` against the
+   Ubuntu deployment VM (ADR-0017)** — a macOS-only pass is necessary but not sufficient, since
+   real macOS/Ubuntu divergence has already surfaced once (ADR-0016).
 3. **For dashboard stories (Epics F–G):** the actual running UI is driven directly (browser
    automation) through the flow the story describes — click search, edit a transaction, view
-   the source email, etc. — and the result is observed, not just asserted.
+   the source email, etc. — and the result is observed, not just asserted. **Run against the
+   Ubuntu VM via `python3 scripts/vm_dev.py`**, which starts the app there and opens the SSH
+   tunnel needed to reach it (ADR-0017), not just against a local macOS instance.
 4. **For anything touching live Gmail OAuth (Epic B, starting with B1):** the mechanics
    (redirect, token exchange, error handling) are tested with mocked responses first. The
    **live one-time consent click against the user's real HDFC-linked Gmail account** happens
