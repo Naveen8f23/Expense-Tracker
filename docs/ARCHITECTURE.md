@@ -1,12 +1,11 @@
 # Architecture
 
-Status: **populated (v0.7) — Epic A (Foundation), Epic B (Gmail Ingestion), Epic C
-(Classification & Extraction), and Epic D (Deduplication) built and verified, both on macOS and
-the Ubuntu deployment VM; Epics B and C additionally against the owner's real Gmail account.**
-Technology stack confirmed (ADR-0013); encryption approach revised for cross-platform reliability
-(ADR-0015: application-level field encryption, not SQLCipher). Google's official client libraries
-added for Gmail OAuth/API access (ADR-0018). Detailed build backlog tracked in
-[BACKLOG.md](BACKLOG.md).
+Status: **populated (v0.8) — Epics A-E (Foundation, Gmail Ingestion, Classification & Extraction,
+Deduplication, API Layer) built and verified, both on macOS and the Ubuntu deployment VM; Epics B
+and C additionally against the owner's real Gmail account.** Technology stack confirmed
+(ADR-0013); encryption approach revised for cross-platform reliability (ADR-0015: application-level
+field encryption, not SQLCipher). Google's official client libraries added for Gmail OAuth/API
+access (ADR-0018). Detailed build backlog tracked in [BACKLOG.md](BACKLOG.md).
 
 This document describes the current state of the system's architecture. It should always
 reflect what *is*, not what's planned (that belongs in [ROADMAP.md](ROADMAP.md)) or why a
@@ -150,11 +149,24 @@ Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
   helper (unlike B5's `sync_state`, which reused plain ORM queries directly) since Epic E's E5
   endpoint will want exactly this query shape.
 - **Categorization** — mostly a thin module: remembers the last category a user assigned per
-  Payee (COR-2); no AI/inference in MVP (EXT-2).
-- **Correction** (`CorrectTransaction` use case) — COR-1 through COR-5.
-- **Analytics** (`BuildMonthlySummary` and similar use cases) — ANL-1 through ANL-4.
-- **API Layer** — the only door into the system for any UI, current or future.
-- **Web Dashboard** — a separate front-end application; talks to the API Layer only.
+  Payee (COR-2); no AI/inference in MVP (EXT-2). **Epic E complete (2026-07-19):** realized as
+  `payees.default_category_id` (migration `dcdef4f896b2`), set by `correct_transaction` (E3) and
+  read back by `run_classify_and_extract` (Epic C) when creating a *new* transaction from that
+  payee.
+- **Correction** (`CorrectTransaction` use case) — COR-1 through COR-5. **Epic E complete:**
+  `app/application/correct_transaction.py` (E3) and `app/application/dismiss_transaction.py`
+  (E4, COR-4). Manual "add a transaction with no email" (COR-5, H2) is not yet built.
+- **Analytics** (`BuildMonthlySummary` and similar use cases) — ANL-1 through ANL-4. Not yet
+  built (Epic G).
+- **API Layer** — the only door into the system for any UI, current or future. **Epic E complete:**
+  `app/presentation/transactions_router.py` (E1-E4), `needs_review_router.py` (E5),
+  `categories_router.py` (E6), `sync_router.py` (E7) — all registered in `main.py`. Every
+  endpoint reads/writes through an Application-layer use case; no router queries the ORM
+  directly beyond simple single-row lookups (`session.get`), keeping with the layering in
+  ARCHITECTURE.md §3.
+- **Web Dashboard** — a separate front-end application; talks to the API Layer only. Not yet
+  built (Epic F onward) — Epic E's endpoints have only been exercised via automated `TestClient`
+  requests, not a real browser session yet.
 
 Each of these is swappable independently: e.g. the `GmailClient` could later be joined by a
 second bank's client without touching Extraction, Storage, or the Dashboard; the
@@ -194,7 +206,10 @@ Tables map directly to [REQUIREMENTS.md](REQUIREMENTS.md) §5 Data Model:
 - `transactions` — amount, currency, date, time (nullable), payee, instrument last-4, category,
   payment method, type, reference number (nullable), confidence score, review status, link to
   its `email_messages` row. Not encrypted at the column level (see above).
-- `payees` — payee/merchant identity as it appears in the source email.
+- `payees` — payee/merchant identity as it appears in the source email, plus (added Epic E,
+  migration `dcdef4f896b2`) `default_category_id`: the category last assigned to a transaction
+  from this payee (COR-2), applied to that payee's *future* transactions by
+  `run_classify_and_extract`.
 - `categories` — fully user-defined for MVP; no fixed seed list.
 - `correction_log` — original vs. corrected field values (COR-3).
 
@@ -278,15 +293,24 @@ considered and explicitly dropped (ADR-0009) — not an integration in this syst
 
 ## 8. Known Limitations / Technical Debt
 
-- Epics A, B, C, and D (Foundation, Gmail Ingestion, Classification & Extraction, Deduplication)
-  built and verified (BACKLOG.md); Epic E (API Layer) onward not started.
+- Epics A-E (Foundation, Gmail Ingestion, Classification & Extraction, Deduplication, API Layer)
+  built and verified (BACKLOG.md); Epic F (Dashboard) onward not started.
+- **No dashboard exists yet to actually drive Epic E's endpoints through a browser** — verified
+  via automated `TestClient` requests only. This is a real gap for the "actual running UI is
+  driven directly" Definition-of-Done criterion that applies once Epics F-G exist; not a gap for
+  Epic E itself, whose criteria are all API-contract-level.
 - **Classification doesn't yet narrow candidates by the specific sender an email came from** —
   `run_classify_and_extract` tries every configured `SenderRule.content_pattern_id` against every
   processed email, since `EmailMessage` doesn't record which sender address produced it. Correct
   today (exactly one sender address, `alerts@hdfcbank.bank.in`, hosts all three confirmed
   patterns), but will need revisiting if a second bank/sender is added (REQUIREMENTS.md §9).
-- No `Category` is ever assigned automatically (EXT-2, by design) — every Epic C-created
-  `Transaction` has `category_id = NULL` until a user assigns one (Epic F).
+- No `Category` is ever assigned automatically from email content (EXT-2, by design) — a new
+  `Transaction` only gets a non-null `category_id` if its payee already has a remembered default
+  (COR-2, Epic E); a first-ever transaction from a brand-new payee is still uncategorized until a
+  user assigns one (Epic F).
+- **E3's "correct the payee" only renames the shared `Payee` row**, it doesn't reassign a
+  transaction to a different `Payee` entity — see BACKLOG.md E3's design note. Revisit if this
+  turns out to be the wrong call once the correction UI (Epic F) is actually used.
 - Encryption at rest is **field-level, not whole-database** (ADR-0015) — transaction data
   itself relies on OS-level disk encryption if the user wants that layer protected too; this is
   a real, accepted limitation, not an oversight (see REQUIREMENTS.md §4 NFR Security).

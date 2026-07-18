@@ -82,14 +82,18 @@ Copy this block per milestone:
   fully closing it out is blocked only on the pending 4th template sample.
 
 ### M4: Review, Correction & Traceability
-- **Status:** Planned
+- **Status:** In Progress
 - **Target:** TBD
 - **Goal:** Let the user see, correct, and trust the extracted data, with every transaction
   traceable to its source email.
 - **Requirements covered:** REQUIREMENTS.md §3.4 (Correction & Feedback), §3.5 (Traceability).
 - **Success criteria:** Corrections are one-time (don't recur for the same merchant); every
   transaction links back to its source email(s).
-- **Dependencies:** M3.
+- **Dependencies:** M3. **Progress (2026-07-19):** the API foundation is done (BACKLOG.md Epic
+  E) — correction, dismiss, and traceability (source email lookup) all exist and are tested at
+  the API-contract level. Nothing is user-facing yet; the actual dashboard (Epic F) hasn't
+  started, so this milestone's real success criteria (the user can *see* and *use* this) aren't
+  met yet.
 
 ### M5: Search, History & Core Analytics (MVP Complete)
 - **Status:** Planned
