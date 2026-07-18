@@ -383,6 +383,43 @@ Copy this block for each new decision:
     here as the presumed encryption approach) turned out not to be reliably installable
     cross-platform; superseded by ADR-0015's application-level field encryption.
 
+### ADR-0014: Verification policy — automated tests + agent-driven UI checks, epic checkpoints, user-gated Gmail live testing
+
+- **Date:** 2026-07-18
+- **Status:** Accepted
+- **Decision:**
+  1. Backend/logic stories (Epics A–E) are verified with automated tests, run for real, using
+     the confirmed sample emails (REQUIREMENTS.md Appendix A) as fixtures — not just written
+     and assumed to pass.
+  2. Dashboard stories (Epics F–G) are verified by directly driving the running UI (browser
+     automation) through the flow each story describes, observing the actual result.
+  3. The live Gmail OAuth consent step (starting with story B1) is tested mechanically with
+     mocked responses, but the one-time real consent grant happens against the user's actual
+     HDFC-linked Gmail account, performed by the user directly — this cannot be done on the
+     user's behalf.
+  4. After the first real backfill (story B3), the user spot-checks a handful of resulting
+     transactions against their own memory/bank statement, since real inbox variety can exceed
+     what the three confirmed templates cover.
+  5. A short demo and explicit user go-ahead is required at the end of each epic before the
+     next epic begins — epics are checkpoints, not silent internal milestones.
+- **Context:** The user asked directly how completed epics/stories would be verified as working
+  correctly, rather than just assumed. This also surfaces a genuine constraint: some
+  verification (live account consent, real-inbox correctness beyond known samples) cannot be
+  self-verified and requires the user's direct involvement.
+- **Alternatives considered:** Fully autonomous build-through with no checkpoints, flagging only
+  clear failures — rejected; the user explicitly chose per-epic demo/sign-off over this to catch
+  misunderstandings early rather than at the end of the whole backlog. A separate/throwaway
+  Gmail account for initial OAuth testing before touching the real account — considered and
+  rejected by the user in favor of testing directly against the real HDFC-linked account.
+- **Reasoning:** Matches Constitution principle 16 (correctness first) and principle 19 (don't
+  assume — ask/verify) applied to the build phase, not just the requirements phase. Splitting
+  verification by story type (deterministic backend vs. UI vs. live-credential-gated) matches
+  what can actually be checked by which means, rather than a one-size-fits-all testing claim.
+- **Consequences:** Every epic in [BACKLOG.md](BACKLOG.md) ends with a demo/checkpoint before
+  the next begins (see its "Definition of Done" section). Story B1 and B3 explicitly require
+  the user's direct participation, not just review — this should be scheduled for when Epic B
+  is reached, not assumed to be automatic.
+
 ### ADR-0015: Platform-independence constraint, and encrypting only sensitive fields instead of the whole database
 
 - **Date:** 2026-07-18
@@ -430,39 +467,94 @@ Copy this block for each new decision:
   as their acceptance criteria. Any dev-tooling scripts (A4) must avoid OS-specific commands
   (e.g. no macOS-only utilities), favoring Python-based orchestration for portability.
 
-### ADR-0014: Verification policy — automated tests + agent-driven UI checks, epic checkpoints, user-gated Gmail live testing
+### ADR-0016: Bump SQLAlchemy and Alembic to the latest 2.0.x/1.x patch releases for Python 3.14 compatibility
+
+- **Date:** 2026-07-18
+- **Status:** Accepted
+- **Decision:** Bump `sqlalchemy` from `2.0.36` to `2.0.51` and `alembic` from `1.14.0` to
+  `1.18.5` in `backend/requirements.txt`. Both stay within the same major/minor line already
+  approved in ADR-0013 (SQLAlchemy 2.0.x); this is a patch-level update, not a new dependency or
+  a framework change.
+- **Context:** First real verification of Epic A on the Ubuntu deployment target (ADR-0015)
+  surfaced a concrete platform-independence failure: the target VM (Ubuntu 26.04 LTS) ships only
+  Python 3.14 — no 3.10/3.11/3.12 package exists in its repos, and no deadsnakes PPA is
+  configured. `scripts/setup.py`'s `find_system_python()` correctly falls back to `python3`
+  (3.14.4) per its documented preference order, but SQLAlchemy 2.0.36's declarative mapping
+  crashes under Python 3.14 (`TypeError: descriptor '__getitem__' requires a 'typing.Union'
+  object but received a 'tuple'`) — a known incompatibility between that SQLAlchemy patch version
+  and Python 3.14's changed `typing` internals, unrelated to this codebase's own code.
+- **Alternatives considered:**
+  - **Install an older Python (3.11/3.12) on the VM via a third-party APT repo (deadsnakes
+    PPA)** — rejected: Ubuntu 26.04's own repositories don't carry any Python older than 3.14,
+    so this would mean adding a third-party package source on the deployment target — the same
+    category of fragile, non-standard cross-platform dependency that ADR-0015 already rejected
+    once (there, for SQLCipher).
+  - **Pin to the exact SQLAlchemy/Alembic versions from ADR-0013 and require a specific Python
+    version everywhere** — rejected: contradicts the platform-independence requirement
+    (ADR-0015), which commits to running identically on whatever stock Python the deployment
+    Ubuntu VM provides.
+- **Reasoning:** A same-line patch bump is the smallest possible change that restores
+  compatibility — both new versions are confirmed to support Python 3.14 (verified by
+  successfully running `alembic upgrade head` and the full test suite on the Ubuntu VM after the
+  bump) and were also re-verified locally on macOS (Python 3.12) with no regression, so this
+  doesn't trade one platform's correctness for another's.
+- **Consequences:** `backend/requirements.txt` now pins `sqlalchemy==2.0.51` and
+  `alembic==1.18.5`. Epic A is now verified end-to-end on both macOS (dev) and the Ubuntu 26.04
+  deployment VM (all 5 backend tests pass on both; backend + frontend dev servers start, respond,
+  and CORS works correctly on the VM; encrypted `tokens`/`content` columns confirmed as `BLOB` in
+  the raw SQLite file on the VM, matching H1). `ARCHITECTURE.md` §8's "not yet verified on Ubuntu"
+  limitation is resolved. No deadsnakes PPA or other third-party package source was added to the
+  VM.
+
+### ADR-0017: The Ubuntu VM, not macOS, is the authoritative verification environment; add `scripts/vm_*.py` tooling
 
 - **Date:** 2026-07-18
 - **Status:** Accepted
 - **Decision:**
-  1. Backend/logic stories (Epics A–E) are verified with automated tests, run for real, using
-     the confirmed sample emails (REQUIREMENTS.md Appendix A) as fixtures — not just written
-     and assumed to pass.
-  2. Dashboard stories (Epics F–G) are verified by directly driving the running UI (browser
-     automation) through the flow each story describes, observing the actual result.
-  3. The live Gmail OAuth consent step (starting with story B1) is tested mechanically with
-     mocked responses, but the one-time real consent grant happens against the user's actual
-     HDFC-linked Gmail account, performed by the user directly — this cannot be done on the
-     user's behalf.
-  4. After the first real backfill (story B3), the user spot-checks a handful of resulting
-     transactions against their own memory/bank statement, since real inbox variety can exceed
-     what the three confirmed templates cover.
-  5. A short demo and explicit user go-ahead is required at the end of each epic before the
-     next epic begins — epics are checkpoints, not silent internal milestones.
-- **Context:** The user asked directly how completed epics/stories would be verified as working
-  correctly, rather than just assumed. This also surfaces a genuine constraint: some
-  verification (live account consent, real-inbox correctness beyond known samples) cannot be
-  self-verified and requires the user's direct involvement.
-- **Alternatives considered:** Fully autonomous build-through with no checkpoints, flagging only
-  clear failures — rejected; the user explicitly chose per-epic demo/sign-off over this to catch
-  misunderstandings early rather than at the end of the whole backlog. A separate/throwaway
-  Gmail account for initial OAuth testing before touching the real account — considered and
-  rejected by the user in favor of testing directly against the real HDFC-linked account.
-- **Reasoning:** Matches Constitution principle 16 (correctness first) and principle 19 (don't
-  assume — ask/verify) applied to the build phase, not just the requirements phase. Splitting
-  verification by story type (deterministic backend vs. UI vs. live-credential-gated) matches
-  what can actually be checked by which means, rather than a one-size-fits-all testing claim.
-- **Consequences:** Every epic in [BACKLOG.md](BACKLOG.md) ends with a demo/checkpoint before
-  the next begins (see its "Definition of Done" section). Story B1 and B3 explicitly require
-  the user's direct participation, not just review — this should be scheduled for when Epic B
-  is reached, not assumed to be automatic.
+  1. Going forward, a story or epic's automated tests and dashboard verification (BACKLOG.md
+     "Definition of Done") must be run against the Ubuntu 26.04 deployment VM to count as
+     verified. macOS remains fine, and expected, for the fast local edit/run/debug loop during
+     development — it's just no longer sufficient on its own to call something done.
+  2. Four small, stdlib-only scripts are added under `scripts/`, matching the existing
+     `setup.py`/`dev.py`/`_paths.py` style: `scripts/vm_sync.py` (rsync the source tree to the
+     VM, excludes derived from `.gitignore`), `scripts/vm_test.py` (sync, then run the backend
+     pytest suite on the VM), `scripts/vm_tunnel.py` (open/close an SSH port-forward to the VM's
+     dev servers), and `scripts/vm_dev.py` (sync, (re)start the VM's dev servers, and open the
+     tunnel — the one-command way to look at the dashboard actually running on the VM).
+- **Context:** ADR-0016 found a real macOS/Ubuntu divergence (a Python 3.14/SQLAlchemy
+  incompatibility) that only surfaced once the app was actually run on the Ubuntu VM — a
+  macOS-only test pass had been (and would keep being) a false signal of cross-platform
+  correctness. Verifying manually also turned out error-prone: syncing code via a hand-typed
+  `rsync` command once ran from the wrong working directory and scattered a duplicate copy of
+  `backend/`'s contents into the VM's project root; a manually-typed `pkill` pattern
+  intermittently killed its own invoking shell before finishing cleanup, because the pattern
+  text was also present in that shell's own command line; and a first attempt to reach the app
+  directly via `http://turnny-vm:5173` silently hung, which took a side investigation (ping and
+  SSH both work; the VM's own firewall is inactive) to attribute to the Tailscale network's ACLs
+  rather than anything about the app or the VM itself.
+- **Alternatives considered:**
+  - **Keep verification on macOS only, treat the Ubuntu VM as an occasional spot-check** —
+    rejected: this is exactly the posture that let the Python 3.14 incompatibility go unnoticed
+    through all of Epic A; the whole point of ADR-0015's platform-independence requirement is
+    that the deployment target's behavior is what actually matters.
+  - **Expose the VM's app ports directly on the network (bind `0.0.0.0`, adjust CORS) instead of
+    tunneling over SSH** — rejected: doesn't work here regardless of preference, since the
+    Tailscale ACLs block non-SSH ports between nodes; even where it might work on a different
+    network, it would mean opening ports beyond what the verification workflow actually needs,
+    for a machine that isn't meant to be reachable except by its owner.
+  - **A shell-script wrapper instead of Python** — rejected for the same reason `setup.py`/
+    `dev.py` are already Python: cross-platform behavior (ADR-0015) is easier to keep correct in
+    one stdlib-only language than in shell, which diverges between macOS's BSD userland and
+    Ubuntu's GNU userland (already the direct cause of the `pkill` self-match bug above — a BSD
+    vs. general portability pitfall, not Ubuntu-specific, but the same class of issue this ADR
+    is trying to design out of the workflow).
+- **Reasoning:** Per Constitution principle 16 (correctness first) and principle 21 (fail
+  loudly, not silently), verification should exercise the environment that's actually claimed to
+  work, and repeatable tooling removes the specific, already-demonstrated failure modes of doing
+  this by hand (wrong working directory, self-matching kill patterns, no single source of truth
+  for what's safe to sync).
+- **Consequences:** `docs/ARCHITECTURE.md` §7 and `docs/BACKLOG.md`'s Definition of Done are
+  updated to point at `scripts/vm_test.py`/`scripts/vm_dev.py` as the verification gate. New
+  configuration surface: `VM_HOST`, `VM_REMOTE_DIR` env vars (default to this project's actual
+  VM and remote path), documented in `scripts/_vm.py` and `ARCHITECTURE.md` §6. Epic B onward
+  should verify each story against the VM using this tooling before it's considered done.

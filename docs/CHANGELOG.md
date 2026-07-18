@@ -9,6 +9,32 @@ versioned releases begin.
 ## [Unreleased]
 
 ### Added (code)
+- **`scripts/vm_sync.py`, `scripts/vm_test.py`, `scripts/vm_tunnel.py`, `scripts/vm_dev.py`**
+  (plus shared helper `scripts/_vm.py`): stdlib-only tooling to sync to, test on, and view the
+  app running on the Ubuntu verification VM in one command each, replacing the repeated manual
+  `rsync`/`ssh`/tunnel commands used to verify Epic A there. See
+  [DECISIONS.md](DECISIONS.md) ADR-0017 for why (a manual sync once ran from the wrong directory
+  and scattered files into the VM's project root; a manually-typed `pkill` pattern intermittently
+  killed its own invoking shell) and for the Tailscale-ACL reason a tunnel is used instead of
+  reaching the VM's ports directly.
+
+### Changed
+- **Verification policy:** the Ubuntu deployment VM, not macOS, is now the authoritative
+  environment for a story/epic's "Definition of Done" (`docs/BACKLOG.md`) — run via the new
+  `scripts/vm_test.py`/`scripts/vm_dev.py`. macOS remains the normal environment for day-to-day
+  development. See [DECISIONS.md](DECISIONS.md) ADR-0017.
+
+### Fixed
+- **Epic A verified on the Ubuntu deployment target (2026-07-18):** running the project on the
+  actual Ubuntu 26.04 LTS VM (rather than just macOS) surfaced a real cross-platform bug —
+  Ubuntu 26.04 ships only Python 3.14 (no 3.10/3.11/3.12 available via apt or a PPA), and the
+  previously pinned `sqlalchemy==2.0.36`/`alembic==1.14.0` crash under Python 3.14 due to a
+  `typing` internals incompatibility. Fixed by bumping to `sqlalchemy==2.0.51` and
+  `alembic==1.18.5` (same 2.0.x/1.x line already approved in ADR-0013) — verified with no
+  regression on macOS and with the full setup/test/dev-server flow passing on the Ubuntu VM. See
+  [DECISIONS.md](DECISIONS.md) ADR-0016.
+
+### Added (code)
 - **Epic A (Foundation) complete** — first real application code, per `docs/BACKLOG.md`:
   - `backend/`: FastAPI app in a layered structure (domain/application/infrastructure/
     presentation), `GET /health` endpoint, CORS enabled for the dashboard's origin.
