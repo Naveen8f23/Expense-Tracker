@@ -1,7 +1,8 @@
 # Backlog
 
-Status: **v0.4 — Epic A (Foundation), Epic B (Gmail Ingestion), and Epic C (Classification &
-Extraction) done and verified (2026-07-19). Epic D (Deduplication) is next, not yet started.**
+Status: **v0.5 — Epic A (Foundation), Epic B (Gmail Ingestion), Epic C (Classification &
+Extraction), and Epic D (Deduplication) done and verified (2026-07-19); A–C merged to main
+(PR #3). Epic E (API Layer) is next, not yet started.**
 
 This is the detailed, implementation-level breakdown of [ROADMAP.md](ROADMAP.md) milestones
 M2–M5, into units small enough to pick up and build one at a time. ROADMAP.md stays
@@ -445,9 +446,10 @@ via net banking — correctly falls to needs-review rather than being counted as
 exactly matching REQUIREMENTS.md §7 Assumption 11's prediction. See REQUIREMENTS.md Edge Cases
 §10 and CHANGELOG.md for the full record.
 
-Per the epic-checkpoint policy (ADR-0014), this is the point for a demo and the owner's explicit
-go-ahead before Epic D (Deduplication) begins. Not yet committed to git — same as Epic B, this is
-meant to be committed as one whole once epic-level verification is confirmed by the user.
+Demoed live (including the two real bugs above, found via the owner's own real transactions) and
+confirmed by the owner. Committed as one whole and merged to main via
+[PR #3](https://github.com/Naveen8f23/Expense-Tracker/pull/3), per the epic-checkpoint policy
+(ADR-0014) and the same commit-once-per-epic approach as Epic B.
 
 **Scope note:** classification currently considers every configured `SenderRule.content_pattern_id`
 as a candidate for every processed email, rather than narrowing to the specific sender address an
@@ -460,30 +462,59 @@ narrows candidates per-message rather than trying every known bank's patterns ag
 
 ## Epic D — Deduplication (ROADMAP.md M3)
 
-### D1. Message-ID based duplicate detection
+**Design note before the stories below:** unlike Epics B/C, Epic D added no new production code.
+DUP-1 and DUP-2 turned out to already be fully guaranteed by constraints introduced in earlier
+epics — `email_messages.message_id` is `unique` (A2), `transactions.email_message_id` is
+`unique` (A2), and C7's `run_classify_and_extract` only ever processes `UNPROCESSED` emails, so
+an already-`MATCHED`/`NEEDS_REVIEW` email is never reprocessed. There is also no content-based
+matching step anywhere (by design — ADR-0009 deliberately dropped the vendor/bank-alert
+correlation problem that would have needed one). A dedicated `Deduplicator` component, as sketched
+in `ARCHITECTURE.md`'s original module list, would have had no actual logic to hold — adding one
+anyway would be exactly the unnecessary-abstraction Constitution principle 2 warns against. Both
+stories below are confirming tests against the real pipeline, not new logic.
+
+### D1. Message-ID based duplicate detection ✅
 **As** the owner-operator, **I want** the same Gmail message never to become two transactions,
 **so that** re-syncs or retries don't inflate my history (DUP-1).
 
 **Acceptance criteria:**
 - Re-running ingestion (B3/B4) against an already-processed message ID is a no-op — zero new
-  `transactions` rows.
-- Covered by an automated test that ingests the same sample email twice.
+  `transactions` rows. ✅
+- Covered by an automated test that ingests the same sample email twice. ✅
+  `TestDup1MessageIdDeduplication` (`backend/tests/test_deduplication.py`) — ingests one message,
+  confirms one `Transaction`; re-ingests the identical message ID, confirms it's recognized as an
+  existing message (ING-6) with no second `EmailMessage` row; re-runs
+  `run_classify_and_extract` again, confirms it's a no-op (the email is no longer `UNPROCESSED`)
+  and the `Transaction` count is still exactly one.
 
 **Depends on:** C4–C6. **Size:** S.
 
-### D2. Reference-number / timestamp fallback disambiguation
+### D2. Reference-number / timestamp fallback disambiguation ✅
 **As** the owner-operator, **I want** two genuinely separate transactions with the same
 amount/payee/day to both be recorded, **not** merged, **so that** real spending isn't lost
 (DUP-2).
 
 **Acceptance criteria:**
 - Two UPI transactions with the same amount, payee, and day but different reference numbers
-  both create separate `transactions` rows.
+  both create separate `transactions` rows. ✅
 - For the Credit Card Debit template (no reference number, per C6), two same-day/same-
   amount/same-payee transactions are disambiguated by full timestamp instead, and still both
-  recorded as separate rows if their timestamps differ.
+  recorded as separate rows if their timestamps differ. ✅
 
 **Depends on:** D1. **Size:** M.
+
+Tests: `TestDup2ReferenceNumberAndTimestampDisambiguation`
+(`backend/tests/test_deduplication.py`) — two UPI debits, same amount/payee/day, different
+reference numbers, both recorded (and correctly share one `Payee` row — reuse, not a merge); two
+credit card debits, same amount/payee/day, different times, both recorded; and, to make the "no
+content-based matching at all" design explicit rather than merely assumed, two credit card debits
+with an *exact* coincidental match on amount/payee/day/time-to-the-second are still both recorded
+as separate transactions, since disambiguation here is by Gmail message ID (DUP-1), never by
+comparing transaction content across messages.
+
+93/93 backend tests passing (4 new) on macOS and the Ubuntu VM (ADR-0017). Per the epic-checkpoint
+policy (ADR-0014), this is the point for a demo and the owner's go-ahead before Epic E (API Layer)
+begins.
 
 ---
 
