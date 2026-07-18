@@ -143,20 +143,37 @@ remembering multiple manual steps.
 
 ## Epic B — Gmail Ingestion (ROADMAP.md M2)
 
-### B1. Gmail OAuth connect flow
+### B1. Gmail OAuth connect flow ✅
 **As** the owner-operator, **I want** to grant read-only Gmail access through Google's consent
 screen from within the app, **so that** the system can start reading my transaction emails.
 
 **Acceptance criteria:**
 - A "Connect Gmail" action completes the OAuth flow and stores the resulting tokens encrypted
-  in `gmail_connections` (ING-1, ING-2).
-- Only read-only scope is requested — no send/delete/modify permission.
+  in `gmail_connections` (ING-1, ING-2). ✅ `GET /gmail/connect` → `GET /gmail/callback`
+  (`app/presentation/gmail_router.py`), using Google's official client libraries (ADR-0018).
+  Verified with mocked responses (`backend/tests/test_gmail_oauth.py`,
+  `test_gmail_routes.py`) and against the owner's real HDFC-linked Gmail account
+  (`naveen8f23@gmail.com`) per ADR-0014 — encrypted `tokens` column confirmed unreadable in the
+  raw SQLite file, decrypts correctly through the ORM.
+- Only read-only scope is requested — no send/delete/modify permission. ✅ Verified against the
+  real granted token: `scopes: ["https://www.googleapis.com/auth/gmail.readonly"]`, nothing else.
 - Token refresh works without user intervention; if refresh fails (e.g. access revoked), this
-  is surfaced, not silently swallowed (ties into B5).
+  is surfaced, not silently swallowed (ties into B5). ✅ `gmail_oauth.get_valid_credentials`
+  refreshes an expired token using the stored `refresh_token` (present and confirmed on the real
+  connection) and raises `GmailAuthError` — never silently swallowed — if refresh fails; unit
+  tested for both paths. Live long-running refresh will be exercised naturally once B3/B4 sync
+  runs over time.
+
+**Bug found and fixed during live verification:** the first live consent attempt failed with
+`invalid_grant: Missing code verifier` — `exchange_code` built a fresh `Flow` object for the
+token exchange, separate from the one `build_authorization_url` used, losing the PKCE
+`code_verifier` Google's client library auto-generates. Fixed by carrying it over explicitly
+between the two steps (module-level, paired with the CSRF `state` check), with a regression test
+that fails without the fix.
 
 **Depends on:** A2. **Size:** M.
 
-### B2. SenderRule configuration + seed data
+### B2. SenderRule configuration + seed data ✅
 **As** the developer, **I want** the three confirmed HDFC `SenderRule`s (UPI debit, UPI credit,
 credit card debit — REQUIREMENTS.md Appendix A) loaded into the database, **so that**
 ingestion and classification have something real to match against.
@@ -164,51 +181,123 @@ ingestion and classification have something real to match against.
 **Acceptance criteria:**
 - `sender_rules` table has one row per confirmed template: sender address
   (`alerts@hdfcbank.bank.in`), a content-pattern identifier, and the resulting transaction
-  type.
+  type. ✅ `ensure_hdfc_sender_rules` (`app/infrastructure/bootstrap.py`), called from a new
+  FastAPI lifespan hook alongside `ensure_default_user` so both exist whenever the app actually
+  runs. Verified against the real local `app.db`: exactly the 3 confirmed rows, correct sender
+  address/pattern id/type, and the pre-existing B1 `gmail_connections` row left untouched.
 - Adding a fourth rule later (credit card credit, or a second bank) requires only a new row,
-  not a code change (validates the extensibility goal in REQUIREMENTS.md §9).
+  not a code change (validates the extensibility goal in REQUIREMENTS.md §9). ✅ `HDFC_SENDER_RULES`
+  is a plain list of tuples; a dedicated test appends a 4th tuple and confirms it's picked up
+  with no other change.
+
+Tests: `backend/tests/test_sender_rules.py` (27/27 backend tests passing on macOS and the
+Ubuntu VM).
 
 **Depends on:** A2. **Size:** S.
 
-### B3. One-time backfill sync
+### B3. One-time backfill sync ✅
 **As** the owner-operator, **I want** the first sync to pull matching emails from the start of
 the current calendar month, **so that** my tracker has a clean starting point (ADR-0011).
 
 **Acceptance criteria:**
 - On first connect, the system fetches all Gmail messages from `sender_rules` senders dated
-  from the 1st of the current month to now.
+  from the 1st of the current month to now. ✅ `run_initial_backfill`
+  (`app/application/run_initial_backfill.py`) + `app/infrastructure/gmail_client.py`, chained
+  automatically at the end of `/gmail/callback` (B1). Date range starts from the 1st of the
+  connection's setup month (`connection.created_at`, ADR-0011), not a rolling window.
 - Each matched raw email is stored as an `email_messages` row with status `unprocessed`
-  (classification/extraction happens in Epic C, not here).
+  (classification/extraction happens in Epic C, not here). ✅ Content is the decoded
+  `text/html` MIME part (falling back to `text/plain`), preserving original formatting for
+  later source-email viewing (TRC-2/F3); encrypted at rest (ADR-0015).
 - No transaction records are created yet — this story only proves ingestion, not extraction.
+  ✅ No `Transaction` rows are created anywhere in this story's code.
+
+**Verified against the real connected account (`naveen8f23@gmail.com`):** 6 real HDFC emails
+scanned and stored on first run; re-running scanned the same 6 and skipped all as duplicates
+(ING-6/DUP-1) — 0 newly stored. Raw SQLite file confirmed `content` is a BLOB (encrypted, not
+human-readable); decrypts correctly through the ORM. Verified structurally only (length,
+presence of generic banking terms) — actual transaction content was deliberately never printed
+to keep financial data out of any transcript.
+
+Tests: `backend/tests/test_gmail_client.py`, `test_run_initial_backfill.py`, plus additions to
+`test_gmail_routes.py` (41/41 backend tests passing on macOS and the Ubuntu VM).
 
 **Depends on:** B1, B2. **Size:** M.
 
-### B4. Incremental sync via Gmail History API
+### B4. Incremental sync via Gmail History API ✅
 **As** the owner-operator, **I want** subsequent syncs to only fetch what's new since the last
 check, **so that** the app stays fast and doesn't reprocess my whole inbox every time (ING-4,
 ING-5, ING-6).
 
 **Acceptance criteria:**
-- `sync_state` stores the last processed `historyId` per connection.
-- A sync run only fetches changes since that checkpoint.
-- Re-running a sync with no new mail creates zero new `email_messages` rows (idempotent,
-  ties to DUP-1 in Epic D).
+- `sync_state` stores the last processed `historyId` per connection. ✅ Planted at the end of
+  B3's backfill (`_do_backfill`, `gmail_client.get_current_history_id`), advanced by
+  `run_incremental_sync` (`app/application/run_incremental_sync.py`) after each run.
+- A sync run only fetches changes since that checkpoint. ✅
+  `gmail_client.list_message_ids_since_history` (Gmail History API,
+  `historyTypes=['messageAdded']`); results filtered to configured senders after the fact since
+  History API isn't sender-scoped like `messages.list`'s `q=` (`store_new_messages`'s new
+  `keep_if` hook, shared with B3 rather than a second fetch).
+- Re-running a sync with no new mail creates zero new `email_messages` rows (idempotent, ties
+  to DUP-1 in Epic D). ✅ Verified with mocked tests and against the real connected account
+  (0 scanned/stored on a real repeat run).
 - If the checkpoint is too old for Gmail's History API retention window, the system detects
-  this and falls back to a bounded re-scan rather than failing silently.
+  this and falls back to a bounded re-scan rather than failing silently. ✅ Catches the 404
+  Gmail returns for an expired `startHistoryId` (`HistoryCheckpointExpiredError`), re-scans from
+  the last successful sync time (not ADR-0011's original backfill-month window), and re-plants
+  a fresh checkpoint.
+
+**Scope note (explicit decision, not yet built):** nothing automatically calls
+`run_incremental_sync` on a schedule yet. The sync mechanism itself is correct and tested; an
+in-process scheduler (ADR-0013) is deferred until Epic C exists to give newly-synced emails
+somewhere to go — right now they'd just accumulate as `unprocessed` rows either way.
+
+Tests: `backend/tests/test_run_incremental_sync.py` (48/48 backend tests passing on macOS and
+the Ubuntu VM).
 
 **Depends on:** B3. **Size:** M.
 
-### B5. Sync health logging & status
+### B5. Sync health logging & status ✅
 **As** the owner-operator, **I want** to see when the last sync ran and whether anything went
 wrong, **so that** I never have to wonder if the system is silently broken (ING-8).
 
 **Acceptance criteria:**
-- Each sync run logs: start/end time, messages scanned, matched, skipped, failed.
+- Each sync run logs: start/end time, messages scanned, matched, skipped, failed. ✅
+  `sync_state` gained `last_sync_started_at`, `last_scanned`, `last_matched`, `last_skipped`,
+  `last_failed` (migration `96b145d41d66`), set by both `run_initial_backfill` (B3) and
+  `run_incremental_sync` (B4). A message that fails to read (`GmailIngestionError`) is now
+  counted as failed and the run continues — one oddly formatted email no longer blocks every
+  other message in the same sync from being stored (refined `store_new_messages`,
+  `app/application/ingest_gmail_messages.py`).
 - A simple status is queryable (even just a log file or a DB row at this stage — a dedicated
-  API endpoint for this is Epic E, story E7).
-- A failed OAuth refresh (from B1) shows up here, not just in a stack trace.
+  API endpoint for this is Epic E, story E7). ✅ The `sync_state` row itself, queryable via the
+  ORM like any other row — no dedicated read helper added, since E7 will define its own
+  query/serialization needs when the actual endpoint is built.
+- A failed OAuth refresh (from B1) shows up here, not just in a stack trace. ✅ Already covered
+  by B3/B4's existing outer error handling (any exception, including `GmailAuthError` from a
+  failed token refresh, is caught and written to `sync_state.last_error` before re-raising);
+  added a test tying this specifically to an OAuth refresh failure.
+
+**Verified against the real connected account:** re-ran both the backfill and an incremental
+sync after the migration — `sync_state` correctly recorded `scanned=6, matched=0, skipped=6,
+failed=0` (all 6 already-ingested messages correctly recognized as duplicates) and
+`scanned=0, matched=0, skipped=0, failed=0` respectively, with `last_sync_started_at`/
+`last_sync_at` both populated.
+
+Tests: `backend/tests/test_ingest_gmail_messages.py` (new), plus additions to
+`test_run_initial_backfill.py` (53/53 backend tests passing on macOS and the Ubuntu VM).
 
 **Depends on:** B1, B3, B4. **Size:** S.
+
+---
+
+## Epic B — Status: Done (2026-07-18)
+
+All five stories (B1–B5) complete, tested (53/53 backend tests passing on macOS and the Ubuntu
+VM per ADR-0017), and verified against the owner's real HDFC-linked Gmail account per ADR-0014:
+OAuth connect, `SenderRule` seeding, one-time backfill, incremental History-API sync, and sync
+health tracking. Per the epic-checkpoint policy (ADR-0014), this is the point for a demo and the
+owner's explicit go-ahead before Epic C (Classification & Extraction) begins.
 
 ---
 

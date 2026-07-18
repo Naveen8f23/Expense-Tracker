@@ -105,8 +105,16 @@ class SyncState(Base):
         ForeignKey("gmail_connections.id"), unique=True
     )
     last_history_id: Mapped[Optional[str]]
-    last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    last_sync_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)  # B5, ING-8
+    last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime)  # completion time
     last_error: Mapped[Optional[str]]
+    # B5 (ING-8): counts from the most recent sync run (backfill or incremental) -- "matched"
+    # means newly stored (relevant sender, not a duplicate); "skipped" covers both known
+    # duplicates and, for incremental syncs, History API results from unconfigured senders.
+    last_scanned: Mapped[Optional[int]]
+    last_matched: Mapped[Optional[int]]
+    last_skipped: Mapped[Optional[int]]
+    last_failed: Mapped[Optional[int]]
 
     gmail_connection: Mapped[GmailConnection] = relationship(back_populates="sync_state")
 

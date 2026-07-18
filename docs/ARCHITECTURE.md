@@ -82,7 +82,24 @@ monolith, per the original design directive to stay plug-and-play.
 
 Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
 
-- **Ingestion** (`GmailClient` + `SyncScheduler`) — ING-1 through ING-8.
+- **Ingestion** (`GmailClient` + `SyncScheduler`) — ING-1 through ING-8. **Epic B complete
+  (2026-07-18), all verified against the real connected account:**
+  - **B1:** OAuth connect — `app/infrastructure/gmail_oauth.py` (Google's official client
+    libraries, ADR-0018) + `app/application/connect_gmail_account.py` +
+    `app/presentation/gmail_router.py`.
+  - **B3:** one-time backfill — `app/infrastructure/gmail_client.py` +
+    `app/application/run_initial_backfill.py`, chained automatically at the end of the OAuth
+    callback; caches each match as an unprocessed `EmailMessage` (content = decoded `text/html`
+    MIME part, falling back to `text/plain`).
+  - **B4:** incremental sync — `app/application/run_incremental_sync.py`, using Gmail's History
+    API with a bounded-re-scan fallback if the checkpoint expires. Shares its message-storing
+    step with B3 via `app/application/ingest_gmail_messages.py`.
+  - **B5:** sync health — the shared message-storing step now catches a per-message
+    `GmailIngestionError` and counts it as failed rather than aborting the whole run; `sync_state`
+    carries start time and scanned/matched/skipped/failed counts (migration `96b145d41d66`).
+  - **Not yet built:** the `SyncScheduler` itself — nothing calls `run_incremental_sync`
+    automatically yet; explicitly deferred until Epic C gives newly-synced emails somewhere to
+    go (BACKLOG.md B4).
 - **Classification** (`SenderRule` matching — see Appendix A in REQUIREMENTS.md) — ING-3a.
 - **Extraction** (`Extractor`, per-type fixed parsers + `AIFallbackClient`) — EXT-1 through EXT-7.
 - **Deduplication** (`Deduplicator`) — DUP-1, DUP-2.
@@ -125,7 +142,9 @@ Tables map directly to [REQUIREMENTS.md](REQUIREMENTS.md) §5 Data Model:
 - `email_messages` — Gmail message ID, thread ID, received timestamp, processing status,
   **cached content (encrypted column, ADR-0012/ADR-0015)**, and a pointer to the transaction it
   produced (if any).
-- `sync_state` — per-connection checkpoint (last `historyId`, last sync time, last error).
+- `sync_state` — per-connection checkpoint (last `historyId`, last sync started/completed time,
+  last error) plus, since B5, the last run's scanned/matched/skipped/failed message counts
+  (ING-8) — a dedicated API endpoint for reading this is Epic E's E7, not yet built.
 - `transactions` — amount, currency, date, time (nullable), payee, instrument last-4, category,
   payment method, type, reference number (nullable), confidence score, review status, link to
   its `email_messages` row. Not encrypted at the column level (see above).
@@ -213,7 +232,8 @@ considered and explicitly dropped (ADR-0009) — not an integration in this syst
 
 ## 8. Known Limitations / Technical Debt
 
-- Epic A (Foundation) built and verified (BACKLOG.md); Epics B onward not started.
+- Epics A and B (Foundation, Gmail Ingestion) built and verified (BACKLOG.md); Epic C
+  (Classification & Extraction) onward not started.
 - Encryption at rest is **field-level, not whole-database** (ADR-0015) — transaction data
   itself relies on OS-level disk encryption if the user wants that layer protected too; this is
   a real, accepted limitation, not an oversight (see REQUIREMENTS.md §4 NFR Security).
@@ -229,10 +249,12 @@ considered and explicitly dropped (ADR-0009) — not an integration in this syst
   Python 3.14 with no older version available via its repos or a PPA (ADR-0016). Not yet
   exercised: systemd-managed service setup (still run via `scripts/dev.py` directly, as on
   macOS) and the live Gmail OAuth flow (Epic B).
-- The FastAPI app does not yet touch the database at all (no lifespan hook creates tables or
-  runs migrations automatically) — schema setup currently only happens via running
-  `alembic upgrade head` directly (through `scripts/setup.py`). This is expected to remain the
-  case until an epic that actually needs the database (Epic B onward) wires it in.
+- **Updated (B1, 2026-07-18):** the FastAPI app now touches the database directly — the
+  `/gmail/connect`/`/gmail/callback` endpoints (`app/presentation/gmail_router.py`) read/write
+  `GmailConnection` rows per request via `Depends(get_db)`, calling `ensure_default_user`
+  lazily rather than at startup (no lifespan hook was added — not needed yet, per Constitution
+  principle 2). Migrations still only run via `alembic upgrade head` (through
+  `scripts/setup.py`), never automatically at app startup.
 
 ---
 _Every non-trivial entry above should trace back to an ADR in [DECISIONS.md](DECISIONS.md)._

@@ -558,3 +558,33 @@ Copy this block for each new decision:
   configuration surface: `VM_HOST`, `VM_REMOTE_DIR` env vars (default to this project's actual
   VM and remote path), documented in `scripts/_vm.py` and `ARCHITECTURE.md` §6. Epic B onward
   should verify each story against the VM using this tooling before it's considered done.
+
+### ADR-0018: Use Google's official client libraries for Gmail OAuth + API access
+
+- **Date:** 2026-07-18
+- **Status:** Accepted
+- **Decision:** Add `google-auth`, `google-auth-oauthlib`, and `google-api-python-client` as
+  backend dependencies for `GmailClient` (ARCHITECTURE.md §3/§5). These handle the OAuth 2.0
+  authorization-code flow and token refresh, and the Gmail API calls (History API, message
+  fetch) including pagination and rate-limit backoff/retry (ING-7).
+- **Context:** Epic B (Gmail Ingestion) needs to talk to Gmail's OAuth and REST API. The
+  alternative — calling Google's OAuth and Gmail REST endpoints directly via `httpx` (already a
+  pinned dependency) — was considered, since it adds no new dependency.
+- **Alternatives considered:**
+  - **Hand-rolled via `httpx`** — rejected: OAuth token refresh and Gmail's pagination/backoff
+    behavior (ING-5, ING-7) are exactly the kind of easy-to-get-subtly-wrong, security-sensitive
+    code Constitution principle 9 says to prefer a proven solution for over reinventing it
+    ourselves, and a bug in hand-rolled token-refresh logic is a real credential-handling risk,
+    not just a correctness bug.
+- **Reasoning:** Google's own client libraries are the standard, widely-used way to integrate
+  with Gmail from Python, are actively maintained by Google, and directly cover ING-5/ING-7
+  (checkpointed, resumable, backoff-aware sync) as built-in behavior rather than code we'd have
+  to write and test ourselves. Per Constitution principle 3, the cost is a heavier dependency
+  tree (these libraries pull in several transitive dependencies of their own) — accepted, since
+  the alternative's cost (maintaining our own OAuth/refresh/retry logic) is higher and riskier
+  for a single-person project.
+- **Consequences:** `backend/requirements.txt` gains three new packages (plus their transitive
+  dependencies) once B1 is implemented. `GmailClient` (Infrastructure layer, ARCHITECTURE.md §3)
+  wraps these libraries behind its own interface, so nothing above it depends on Google's
+  libraries directly — consistent with the plug-and-play module boundary (REQUIREMENTS.md §9)
+  that would let a second ingestion source be added later without touching this seam.
