@@ -1,7 +1,8 @@
 # Backlog
 
-Status: **v0.2 — Epic A (Foundation) done and verified (2026-07-18); code committed and
-pushed. Epic B (Gmail Ingestion) is next, not yet started.**
+Status: **v0.3 — Epic A (Foundation) and Epic B (Gmail Ingestion) done and verified
+(2026-07-18); code committed and pushed. Epic C (Classification & Extraction) is next, not yet
+started.**
 
 This is the detailed, implementation-level breakdown of [ROADMAP.md](ROADMAP.md) milestones
 M2–M5, into units small enough to pick up and build one at a time. ROADMAP.md stays

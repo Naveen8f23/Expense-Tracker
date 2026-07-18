@@ -50,15 +50,17 @@ Copy this block per milestone:
 - **Dependencies:** M0.
 
 ### M2: Ingestion Foundation
-- **Status:** Planned
-- **Target:** TBD
+- **Status:** Done
+- **Target:** 2026-07-18
 - **Goal:** Reliably and securely connect to Gmail and pull in exactly the four configured
   bank/UPI notification email types, without processing anything twice.
 - **Requirements covered:** REQUIREMENTS.md §3.1 (Gmail Ingestion, incl. `SenderRule`
   configuration per ADR-0009), relevant NFRs (security — credentials, reliability/idempotency).
 - **Success criteria:** A connected Gmail account can be backfilled and then kept in sync
   incrementally against the four configured senders, with sync health visible to the user
-  (ING-8).
+  (ING-8). Met via BACKLOG.md Epic B (B1–B5), verified against the owner's real Gmail account —
+  note only 3 of the 4 templates are seeded (`SenderRule`) so far, since the 4th (credit card
+  credit) sample is still pending (REQUIREMENTS.md §8).
 - **Dependencies:** M1. Needs the four sample emails and sender addresses from the user before
   the `SenderRule` parsing logic can be designed in detail.
 

@@ -1,8 +1,10 @@
 # Architecture
 
-Status: **populated (v0.4) — initial system design laid out and Epic A (Foundation) built and
-verified.** Technology stack confirmed (ADR-0013); encryption approach revised for
-cross-platform reliability (ADR-0015: application-level field encryption, not SQLCipher).
+Status: **populated (v0.5) — initial system design laid out; Epic A (Foundation) and Epic B
+(Gmail Ingestion) built and verified, both on macOS and the Ubuntu deployment VM, and Epic B
+against the owner's real Gmail account.** Technology stack confirmed (ADR-0013); encryption
+approach revised for cross-platform reliability (ADR-0015: application-level field encryption,
+not SQLCipher). Google's official client libraries added for Gmail OAuth/API access (ADR-0018).
 Detailed build backlog tracked in [BACKLOG.md](BACKLOG.md).
 
 This document describes the current state of the system's architecture. It should always
