@@ -1,8 +1,8 @@
 # Backlog
 
-Status: **v0.5 — Epic A (Foundation), Epic B (Gmail Ingestion), Epic C (Classification &
-Extraction), and Epic D (Deduplication) done and verified (2026-07-19); A–C merged to main
-(PR #3). Epic E (API Layer) is next, not yet started.**
+Status: **v0.6 — Epics A-D done, verified, and merged to main (2026-07-19; PR #3, PR #4). Epic E
+(API Layer) also done and verified (2026-07-19), not yet merged. Epic F (Dashboard: Review &
+Correction) is next, not yet started.**
 
 This is the detailed, implementation-level breakdown of [ROADMAP.md](ROADMAP.md) milestones
 M2–M5, into units small enough to pick up and build one at a time. ROADMAP.md stays
@@ -512,87 +512,145 @@ with an *exact* coincidental match on amount/payee/day/time-to-the-second are st
 as separate transactions, since disambiguation here is by Gmail message ID (DUP-1), never by
 comparing transaction content across messages.
 
-93/93 backend tests passing (4 new) on macOS and the Ubuntu VM (ADR-0017). Per the epic-checkpoint
-policy (ADR-0014), this is the point for a demo and the owner's go-ahead before Epic E (API Layer)
-begins.
+93/93 backend tests passing (4 new) on macOS and the Ubuntu VM (ADR-0017). Demoed and confirmed by
+the owner; committed and merged to main via
+[PR #4](https://github.com/Naveen8f23/Expense-Tracker/pull/4), per the epic-checkpoint policy
+(ADR-0014).
 
 ---
 
 ## Epic E — API Layer (ROADMAP.md M4 foundation)
 
-### E1. List/search transactions endpoint
+### E1. List/search transactions endpoint ✅
 **As** the dashboard, **I want** an endpoint to list transactions with filters, **so that** the
 UI never queries the database directly (SRCH-1).
 
 **Acceptance criteria:**
 - `GET /transactions` supports filtering by payee, category, date range, amount range, payment
-  method, and type, plus free-text.
+  method, and type, plus free-text. ✅ `app/application/list_transactions.py`
+  (`list_transactions`/`TransactionFilters`) + `app/presentation/transactions_router.py`.
+  Free-text (`q`) matches payee name/identifier or category name — the human-readable text
+  fields on a transaction, not amount/date/reference number (those have dedicated filters).
 - Paginated; performs well against a few thousand rows (SRCH-2 — no hard number required yet,
-  just "not obviously slow").
+  just "not obviously slow"). ✅ `limit`/`offset` query params (default 50, max 200); response
+  includes `total` for the caller to build pagination controls.
+- **Also enforced here (not stated as an E1 criterion, but load-bearing):** dismissed
+  transactions (COR-4) are excluded by default.
 
 **Depends on:** A2, C4–C6, D1–D2. **Size:** M.
 
-### E2. Get single transaction (with source email) endpoint
+### E2. Get single transaction (with source email) endpoint ✅
 **As** the dashboard, **I want** to fetch one transaction plus its linked source email content,
 **so that** the user can verify extraction against the original (TRC-1, TRC-2).
 
 **Acceptance criteria:**
 - `GET /transactions/{id}` returns the transaction fields and the cached email content
-  (ADR-0012) it was derived from.
+  (ADR-0012) it was derived from. ✅ `app/presentation/transactions_router.py`
+  (`get_transaction_endpoint`); scoped to the requesting user's own transactions (returns 404,
+  not another user's data, for an id that isn't theirs — REQUIREMENTS.md §9 multi-user
+  readiness, even though only one user exists today).
 
 **Depends on:** E1. **Size:** S.
 
-### E3. Edit/correct transaction endpoint
+### E3. Edit/correct transaction endpoint ✅
 **As** the dashboard, **I want** an endpoint to update a transaction's fields, **so that** the
 user can fix extraction mistakes (COR-1, COR-3).
 
 **Acceptance criteria:**
-- `PATCH /transactions/{id}` accepts amount, date, payee, category, payment method, type.
-- Writes an entry to `correction_log` capturing the before/after values.
+- `PATCH /transactions/{id}` accepts amount, date, payee, category, payment method, type. ✅
+  `app/application/correct_transaction.py` (`correct_transaction`/`TransactionCorrection`).
+  **Design note on "payee":** correcting it renames the shared `Payee` row (`name`) rather than
+  reassigning the transaction to a different `Payee` entity — REQUIREMENTS.md's data model
+  explicitly defers "alias normalization" (treating two similar payee strings as one real-world
+  entity) as a post-MVP idea; a full reassign-to-a-different-payee flow would be building that
+  early. A naming correction is what COR-1 is understood to mean for MVP.
+- Writes an entry to `correction_log` capturing the before/after values. ✅ One `CorrectionLog`
+  row per changed field (a no-op field, e.g. re-submitting the same amount, doesn't log).
 - Assigning a category to a payee is remembered so future transactions from that payee default
-  to it (COR-2) — this is the categorization module's only real logic for MVP.
+  to it (COR-2) — this is the categorization module's only real logic for MVP. ✅ New
+  `payees.default_category_id` column (migration `dcdef4f896b2`); `run_classify_and_extract`
+  (Epic C) now looks this up when creating a *new* transaction, rather than always leaving
+  `category_id` null — a small, deliberate cross-epic change tying E3 back into C7's
+  transaction-creation step.
+- **Also added (not stated as a criterion, but the only place it makes sense to set):**
+  correcting a transaction sets its `review_status` to `USER_CONFIRMED` — the one `ReviewStatus`
+  value nothing else in the system ever sets.
 
 **Depends on:** E1, E2. **Size:** M.
 
-### E4. Mark "not a real expense" endpoint
+### E4. Mark "not a real expense" endpoint ✅
 **As** the dashboard, **I want** to hide a misclassified transaction from analytics without
 deleting its audit trail, **so that** my summaries stay accurate (COR-4).
 
 **Acceptance criteria:**
 - `POST /transactions/{id}/dismiss` (or similar) excludes it from search/analytics by default
-  but keeps the row and its source email intact.
+  but keeps the row and its source email intact. ✅ `app/application/dismiss_transaction.py`;
+  E1's `list_transactions` already excludes `dismissed=True` rows by default, so this criterion
+  is satisfied by the two stories working together, not duplicated filtering logic.
 
 **Depends on:** E1. **Size:** S.
 
-### E5. Needs-review queue endpoint
+### E5. Needs-review queue endpoint ✅
 **As** the dashboard, **I want** an endpoint listing everything in the needs-review state,
 **so that** the review UI (Epic F) has something to show (EXT-5, EXT-6, C7).
 
 **Acceptance criteria:**
 - `GET /needs-review` returns all `email_messages`/`transactions` currently flagged, with
-  enough context (raw content, attempted classification) to review without leaving the app.
+  enough context (raw content, attempted classification) to review without leaving the app. ✅
+  `app/application/get_needs_review_queue.py` combines both distinct needs-review concepts:
+  `EmailMessage`s that never became a transaction at all (C7's `get_needs_review_emails`) and
+  `Transaction`s an AI fallback produced but that were never auto-accepted (EXT-4/EXT-5) — the
+  dashboard needs both to build one review screen.
 
 **Depends on:** C7, E1. **Size:** S.
 
-### E6. Category CRUD endpoints
+### E6. Category CRUD endpoints ✅
 **As** the dashboard, **I want** endpoints to list, create, rename, and delete categories,
 **so that** category assignment (EXT-2) is fully user-driven.
 
 **Acceptance criteria:**
-- Full CRUD on `categories`; no fixed system list is seeded (per REQUIREMENTS.md §5).
-- Deleting a category in use prompts reassignment rather than leaving orphaned references.
+- Full CRUD on `categories`; no fixed system list is seeded (per REQUIREMENTS.md §5). ✅
+  `app/application/manage_categories.py` + `app/presentation/categories_router.py`. Creating a
+  duplicate name for the same user is rejected (409) rather than silently allowed — the existing
+  `uq_category_user_name` constraint (Epic A) now actually gets exercised.
+- Deleting a category in use prompts reassignment rather than leaving orphaned references. ✅
+  `DELETE /categories/{id}` without a `reassign_to` query param returns 409 with the affected
+  transaction count if the category is in use; providing `reassign_to` moves those transactions
+  (and any payee's remembered `default_category_id` pointing at the deleted category) to the
+  replacement before deleting. "Prompts" is realized as the API layer's contract here — the
+  actual prompting UI is Epic F's job.
 
 **Depends on:** A2. **Size:** S.
 
-### E7. Sync health status endpoint
+### E7. Sync health status endpoint ✅
 **As** the dashboard, **I want** an endpoint exposing the last sync's health (B5), **so that**
 the UI can show it without reading log files directly.
 
 **Acceptance criteria:**
 - `GET /sync/status` returns last sync time, counts (scanned/matched/skipped/failed), and any
-  current error state.
+  current error state. ✅ `app/application/get_sync_status.py` +
+  `app/presentation/sync_router.py`. Returns 404 if no Gmail account is connected yet, and a
+  distinct `"synced": false` shape if connected but the first backfill hasn't run.
 
 **Depends on:** B5, A2. **Size:** S.
+
+Tests: `backend/tests/test_transactions_routes.py` (E1-E4, 10 tests),
+`backend/tests/test_needs_review_routes.py` (E5, 2 tests),
+`backend/tests/test_categories_routes.py` (E6, 8 tests),
+`backend/tests/test_sync_routes.py` (E7, 3 tests), plus one new test in
+`test_run_classify_and_extract.py` confirming the COR-2 default-category wiring. 117/117 backend
+tests passing (24 new) on macOS and the Ubuntu VM (ADR-0017); the new `payees.default_category_id`
+migration (`dcdef4f896b2`) was applied to both the local and VM real databases.
+
+---
+
+## Epic E — Status: Done (2026-07-19)
+
+All seven stories (E1–E7) complete. No dashboard exists yet to drive these endpoints through a
+browser (that's Epic F) — verified via automated tests (TestClient) against the real request/
+response contract, per the Definition of Done for backend/logic stories. Per the epic-checkpoint
+policy (ADR-0014), this is the point for a demo and the owner's go-ahead before Epic F (Dashboard:
+Review & Correction) begins.
 
 ---
 

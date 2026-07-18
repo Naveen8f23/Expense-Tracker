@@ -149,6 +149,32 @@ class TestSuccessfulExtraction:
         assert session.query(Payee).count() == 1
         assert session.query(Transaction).count() == 2
 
+    def test_a_new_transaction_defaults_to_the_payees_remembered_category(
+        self, session, user, connection
+    ):
+        # COR-2 (BACKLOG.md E3): once a user has assigned a category to this payee (e.g. via a
+        # prior correction), a brand-new transaction from the same payee should default to it
+        # rather than starting uncategorized again.
+        from app.infrastructure.models import Category
+
+        category = Category(user_id=user.id, name="Food")
+        session.add(category)
+        session.commit()
+        payee = Payee(
+            name="GOLKONDAS CAFE",
+            identifier="vyapar.171813527289@hdfcbank",
+            default_category_id=category.id,
+        )
+        session.add(payee)
+        session.commit()
+
+        _make_email(session, connection, "msg-good", UPI_DEBIT_SAMPLE)
+        run_classify_and_extract(session, user)
+
+        transaction = session.query(Transaction).one()
+        assert transaction.category_id == category.id
+        assert session.query(Payee).count() == 1  # reused, not duplicated
+
 
 class TestAiFallback:
     def test_a_successful_fallback_extraction_still_creates_a_needs_review_transaction(

@@ -6,7 +6,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.infrastructure.bootstrap import ensure_default_user, ensure_hdfc_sender_rules
 from app.infrastructure.db import SessionLocal
+from app.presentation.categories_router import router as categories_router
 from app.presentation.gmail_router import router as gmail_router
+from app.presentation.needs_review_router import router as needs_review_router
+from app.presentation.sync_router import router as sync_router
+from app.presentation.transactions_router import router as transactions_router
 
 
 @asynccontextmanager
@@ -25,6 +29,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Expense Tracker API", lifespan=lifespan)
 app.include_router(gmail_router)
+app.include_router(transactions_router)
+app.include_router(needs_review_router)
+app.include_router(categories_router)
+app.include_router(sync_router)
 
 # Local-first, single-user (ADR-0002): the only expected caller is our own dashboard,
 # running on a different dev port (Vite) or later served by this same backend. Origins are

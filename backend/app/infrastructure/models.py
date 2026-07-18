@@ -129,6 +129,10 @@ class Payee(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str]
     identifier: Mapped[Optional[str]]  # VPA or card-merchant descriptor, as seen in the email
+    # COR-2 (BACKLOG.md E3): once the user assigns a category to a transaction from this payee,
+    # it's remembered here so *future* transactions from the same payee default to it -- this is
+    # the categorization module's only real logic for MVP (no auto-inference, per EXT-2).
+    default_category_id: Mapped[Optional[int]] = mapped_column(ForeignKey("categories.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

@@ -67,7 +67,10 @@ def _create_transaction(
         txn_time=extracted.txn_time,
         payee_id=payee.id,
         instrument_last4=extracted.instrument_last4,
-        category_id=None,  # EXT-2: category is user-assigned, never auto-inferred
+        # EXT-2: never auto-inferred from content -- but COR-2 (BACKLOG.md E3) says a category
+        # the user already assigned to this payee should carry forward to their *new*
+        # transactions, so this is a lookup of a prior human decision, not new inference.
+        category_id=payee.default_category_id,
         payment_method=extracted.payment_method,
         txn_type=extracted.txn_type,
         reference_number=extracted.reference_number,

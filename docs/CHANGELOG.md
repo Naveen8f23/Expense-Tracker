@@ -9,6 +9,36 @@ versioned releases begin.
 ## [Unreleased]
 
 ### Added (code)
+- **Epic E (API Layer) complete (2026-07-19)** — all seven stories (E1–E7):
+  - **E1 (list/search):** `GET /transactions` (`app/application/list_transactions.py` +
+    `app/presentation/transactions_router.py`) — filters by payee (substring), category, date
+    range, amount range, payment method, type, and free-text (payee/category name); paginated
+    (`limit`/`offset`, response includes `total`); excludes dismissed transactions by default.
+  - **E2 (single transaction):** `GET /transactions/{id}` returns the transaction plus its
+    linked source email content; scoped to the requesting user's own transactions.
+  - **E3 (correct):** `PATCH /transactions/{id}` (`app/application/correct_transaction.py`) —
+    amount, date, payee name, category, payment method, type; writes one `correction_log` row
+    per changed field; sets `review_status=USER_CONFIRMED`. New `payees.default_category_id`
+    column (migration `dcdef4f896b2`, COR-2) is set when a category is assigned, and now read
+    back by `run_classify_and_extract` (Epic C) so a payee's *future* transactions default to
+    it. Correcting "payee" renames the shared `Payee` row rather than reassigning to a different
+    one — see BACKLOG.md E3 for the reasoning (alias normalization is explicitly deferred).
+  - **E4 (dismiss):** `POST /transactions/{id}/dismiss` (`app/application/dismiss_transaction.py`)
+    sets `dismissed=True`; the row and source email are never deleted (COR-4).
+  - **E5 (needs-review):** `GET /needs-review` (`app/application/get_needs_review_queue.py`)
+    combines unmatched/unparseable `EmailMessage`s (C7) and low-confidence `Transaction`s (an AI
+    fallback result never auto-accepted) into one queue.
+  - **E6 (categories):** full CRUD (`app/application/manage_categories.py` +
+    `app/presentation/categories_router.py`); duplicate names for one user are rejected (409);
+    deleting a category in use without an explicit `reassign_to` is rejected (409, with the
+    affected count) rather than orphaning references.
+  - **E7 (sync status):** `GET /sync/status` (`app/application/get_sync_status.py`) surfaces the
+    last sync's health without reading log files directly.
+  - 117/117 backend tests passing (24 new) on macOS and the Ubuntu VM (ADR-0017), via FastAPI's
+    `TestClient` against the real request/response contract — no dashboard exists yet to drive
+    these through an actual browser (that's Epic F).
+
+### Added (code)
 - **Epic D (Deduplication) complete (2026-07-19), no new production code** — DUP-1 (message-ID
   based duplicate detection) and DUP-2 (reference-number/timestamp disambiguation of genuinely
   repeated transactions) were both already guaranteed by constraints introduced in earlier epics:
