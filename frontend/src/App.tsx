@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { getHealth } from "./api/client";
+import AnalyticsView from "./components/AnalyticsView";
 import NeedsReviewView from "./components/NeedsReviewView";
 import TransactionsView from "./components/TransactionsView";
 import { useNewTransactionNotifications } from "./hooks/useNewTransactionNotifications";
 
 type BackendStatus = { kind: "loading" } | { kind: "healthy" } | { kind: "error"; message: string };
-type View = "transactions" | "needs-review";
+type View = "transactions" | "needs-review" | "analytics";
 
 function App() {
   const [backendStatus, setBackendStatus] = useState<BackendStatus>({ kind: "loading" });
@@ -71,16 +72,22 @@ function App() {
         >
           Needs Review
         </button>
+        <button
+          className={view === "analytics" ? "tab-active" : ""}
+          onClick={() => setView("analytics")}
+        >
+          Analytics
+        </button>
       </nav>
-      {view === "transactions" ? (
+      {view === "transactions" && (
         <TransactionsView
           externalRefreshSignal={refreshSignal}
           openTransactionId={pendingTransactionId}
           onOpenedTransaction={() => setPendingTransactionId(null)}
         />
-      ) : (
-        <NeedsReviewView />
       )}
+      {view === "needs-review" && <NeedsReviewView />}
+      {view === "analytics" && <AnalyticsView />}
     </main>
   );
 }

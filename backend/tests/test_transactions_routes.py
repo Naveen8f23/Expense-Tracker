@@ -1,6 +1,6 @@
 """BACKLOG.md E1-E4: transactions API routes."""
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from decimal import Decimal
 
 import pytest
@@ -50,6 +50,8 @@ def _make_transaction(
     payee_identifier="vyapar@hdfcbank",
     category_id=None,
     txn_date_=date(2026, 7, 18),
+    txn_time_=None,
+    received_at=None,
     txn_type=DebitOrCredit.DEBIT,
     payment_method=PaymentMethod.UPI,
     review_status=ReviewStatus.AUTO_ACCEPTED,
@@ -67,7 +69,7 @@ def _make_transaction(
         gmail_connection_id=conn.id,
         message_id=message_id,
         thread_id=f"thread-{message_id}",
-        received_at=datetime.now(timezone.utc),
+        received_at=received_at or datetime.now(timezone.utc),
         status=EmailMessageStatus.MATCHED,
         content="Dear Customer, ...",
     )
@@ -85,7 +87,7 @@ def _make_transaction(
         amount=Decimal(amount),
         currency="INR",
         txn_date=txn_date_,
-        txn_time=None,
+        txn_time=txn_time_,
         payee_id=payee.id,
         instrument_last4="4958",
         category_id=category_id,
@@ -302,3 +304,36 @@ class TestDismissTransaction:
         test_client, _ = client
         response = test_client.post("/transactions/999/dismiss")
         assert response.status_code == 404
+
+
+class TestSortByEffectiveTime:
+    def test_same_day_transactions_are_ordered_by_effective_time_not_creation_order(self, client):
+        test_client, session_factory = client
+        session = session_factory()
+        user = ensure_default_user(session)
+
+        # Inserted in a deliberately scrambled order so passing proves real time-based sorting,
+        # not an accidental match with insertion/id order (the bug being fixed here).
+        mid_id = _make_transaction(
+            session, user, amount="2.00", payee_identifier="mid",
+            txn_date_=date(2026, 7, 18), txn_time_=time(12, 0, 0),
+        ).id
+        late_id = _make_transaction(
+            session, user, amount="3.00", payee_identifier="late",
+            txn_date_=date(2026, 7, 18),
+            received_at=datetime(2026, 7, 18, 10, 0, 0, tzinfo=timezone.utc),  # 15:30 IST
+        ).id
+        early_id = _make_transaction(
+            session, user, amount="1.00", payee_identifier="early",
+            txn_date_=date(2026, 7, 18),
+            received_at=datetime(2026, 7, 18, 3, 0, 0, tzinfo=timezone.utc),  # 08:30 IST
+        ).id
+        session.close()
+
+        response = test_client.get(
+            "/transactions", params={"date_from": "2026-07-18", "date_to": "2026-07-18"}
+        )
+
+        assert response.status_code == 200
+        ids_in_order = [item["id"] for item in response.json()["items"]]
+        assert ids_in_order == [late_id, mid_id, early_id]

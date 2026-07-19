@@ -9,6 +9,67 @@ versioned releases begin.
 ## [Unreleased]
 
 ### Added (code)
+- **Epic G (Search & Analytics) complete (2026-07-19)** — all four stories (G1–G4), closing out
+  REQUIREMENTS.md §13's MVP definition (modulo the still-pending 4th email template):
+  - **G2 (monthly summary):** `app/application/analytics.py` (`get_monthly_summary`) +
+    `app/presentation/analytics_router.py` — `GET /analytics/monthly?month=YYYY-MM` (defaults to
+    the current month), bucketed by `txn_date` (not email-received date, per Edge Cases §10).
+    A new "Analytics" tab (`frontend/src/components/AnalyticsView.tsx`) adds Previous/Next month
+    navigation and summary cards (spent/received/net/count).
+  - **G3 (category breakdown):** `get_category_breakdown` — debits only (a refund isn't spend),
+    grouped by category with an "Uncategorized" bucket for untagged transactions, ordered by
+    total descending; rendered as a plain table in the same Analytics tab, reusing G2's month
+    cursor rather than a separate date-range picker.
+  - **G4 (payee history):** `get_payee_history` — matches by case-insensitive exact payee name
+    (not substring, since the dashboard's one caller is always an exact click on an exact name),
+    404s for an unknown name; `frontend/src/components/PayeeHistoryPanel.tsx` opens as a side
+    panel (matching `TransactionDetailPanel`'s shape) when a payee name is clicked in
+    `TransactionsView`'s table, showing totals plus a clickable transaction list that opens the
+    existing detail panel on top.
+  - **G1 (search/filter polish)** — no acceptance criteria existed in BACKLOG.md; resolved via a
+    clarifying question to the owner (functional + visual polish, no URL-persisted filters).
+    `TransactionsView.tsx`'s free-text/payee inputs are now debounced (~400ms) instead of firing
+    one request per keystroke; a "Clear all filters" button resets every filter (all inputs are
+    now controlled, so this also visibly clears the DOM); active filters render as removable
+    chips.
+  - Five money-semantics/scope decisions not spelled out in the original story text (sign
+    convention, debit-only category spend, shared month cursor for G3, exact-name payee
+    matching, no date scoping on G4) recorded in [DECISIONS.md](DECISIONS.md) ADR-0021.
+  - 139/139 backend tests passing (8 new) on macOS and the Ubuntu VM (`scripts/vm_test.py`).
+    Dashboard verified by directly driving the running UI (Browser tool): confirmed the debounce
+    via the Network tab (6 keystrokes → 1 request), chip removal and "Clear all," month
+    navigation between a populated and an empty month, category breakdown excluding a real
+    credit, and the full payee-history-panel → transaction-detail-panel click-through. No bugs
+    found this time. Deployed live to the production VM via `scripts/deploy_vm.py` and confirmed
+    working against the owner's real data.
+  - **Requested live during the epic-checkpoint demo (2026-07-19):** the transaction date column
+    (F1's table, and G4's payee history panel) now shows a time next to the date, in 12-hour
+    AM/PM format, for every transaction — not just the ones whose source template captured one.
+    The UPI templates are date-only (REQUIREMENTS.md Appendix A), so there's no real bank
+    transaction time to show for those; the owner was asked directly (rather than fabricating a
+    time silently) and chose to show the source email's received time instead, visually marked as
+    an approximation (`~` prefix, muted/dotted styling, a tooltip explaining it's not the actual
+    transaction time). `serialize_transaction` (`app/presentation/serializers.py`) now exposes
+    `email_received_at`; `list_transactions`/`get_transactions_since`/`get_payee_history` eager-
+    load the `email_message` relationship (`joinedload`) to avoid an N+1 query per row now that
+    every serialized transaction touches it. A shared `frontend/src/utils/transactionTime.tsx`
+    (`TransactionDateTime`) replaces the two components' previously-duplicated formatting logic.
+  - **Follow-up, requested immediately after (2026-07-19):** the transaction list wasn't actually
+    sorted by the time it now displays — `list_transactions`/`get_payee_history` still ordered by
+    `Transaction.id` within a date (creation order), which visibly scrambled same-day rows once a
+    time column existed to notice it by. Fixed with a new `app/domain/transaction_time.py`
+    (`effective_sort_datetime`) — the same "real `txn_time`, or the email's received time shifted
+    to IST" logic the display uses, now also driving the sort, so the two can't disagree. Since
+    this mixes two different source columns/tables, it can't be expressed as a single SQL
+    `ORDER BY`; `list_transactions` and `get_payee_history` now fetch all matching rows (already
+    eager-loading `email_message`) and sort in Python before paginating, trading a small, currently
+    negligible amount of query efficiency for correctness (Constitution principle 16) — acceptable
+    at this product's single-user scale, revisit only if a real performance problem is measured.
+    `backend/tests/test_transaction_time.py` (pure-function unit tests, including the IST
+    day-boundary edge case) plus new ordering assertions in `test_transactions_routes.py` and
+    `test_analytics_routes.py`. 144/144 backend tests passing (5 new) on macOS and the Ubuntu VM.
+
+### Added (code)
 - **H3 + ADR-0020: the Ubuntu VM becomes the real, permanent, day-to-day instance (2026-07-19)**
   — requested live right after confirming H4's automatic sync worked as intended.
   - `app/presentation/main.py` now serves the frontend's production build (`frontend/dist`) as
