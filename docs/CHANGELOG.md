@@ -9,6 +9,97 @@ versioned releases begin.
 ## [Unreleased]
 
 ### Added (code)
+- **H3 + ADR-0020: the Ubuntu VM becomes the real, permanent, day-to-day instance (2026-07-19)**
+  — requested live right after confirming H4's automatic sync worked as intended.
+  - `app/presentation/main.py` now serves the frontend's production build (`frontend/dist`) as
+    static files at `/`, mounted after all API routes — one process, one port, no separate Vite
+    dev server or CORS needed for that origin. Only mounts if the build exists, so `npm run dev`
+    and the test suite (neither of which builds the frontend) are unaffected.
+  - `frontend/.env.production` sets `VITE_API_BASE_URL=` (relative/same-origin) instead of the
+    dev default's hardcoded `http://localhost:8000`, since production is now same-origin with
+    whatever serves it (a future SSH tunnel on any local port, in this case).
+  - `deploy/expense-tracker.service` + `deploy/README.md` — a persistent `systemd --user` service
+    (auto-restart, survives reboot after a one-time `sudo loginctl enable-linger` run by the owner
+    directly). `scripts/deploy_vm.py` automates future updates: sync, backend deps,
+    `alembic upgrade head`, frontend rebuild, `systemctl --user restart`, health check.
+  - **The VM got its own fresh Gmail connection and backfill** (15 emails scanned/matched, 14
+    transactions created, 1 correctly flagged needs-review — the same "bill payment via net
+    banking" template found during Epic F) — a deliberate fresh start, not a migration of the
+    Mac's existing data, per the owner's own choice when the tradeoff was presented. The local Mac
+    instance was then stopped.
+  - **Two real operational issues found and fixed while making this persistent:** (1) a
+    `systemd --user` service stops the moment the user's last session ends — discovered directly
+    when the service kept dying every ~10 seconds in lockstep with SSH connect/disconnect, fixed
+    by the owner enabling lingering; (2) the OAuth client secret file (`gmail_client_secret.json`,
+    gitignored, never in `rsync`) was copied directly between the owner's own two machines via
+    `scp` with permissions locked to `600` on arrival — never viewed or printed through any tool
+    output.
+  - See [DECISIONS.md](DECISIONS.md) ADR-0020 for the full reasoning and alternatives considered.
+
+### Added (code)
+- **H4: automatic background sync + live dashboard updates (2026-07-19)** — requested live while
+  testing Epic F: new transactions now appear on the dashboard with no manual "sync now" action.
+  - `app/infrastructure/sync_scheduler.py` (`SyncScheduler`) — a background thread polling every
+    5 seconds by default (`SYNC_POLL_INTERVAL_SECONDS`), running the existing incremental-sync +
+    classify/extract pipeline each cycle; started/stopped from FastAPI's lifespan hook.
+  - New `GET /transactions/recent?since_id=` endpoint + `get_transactions_since`
+    (`app/application/list_transactions.py`), ordered by `id` (creation order) rather than
+    `txn_date`, for the dashboard to detect newly-arrived transactions.
+  - `frontend/src/hooks/useNewTransactionNotifications.ts` polls that endpoint every 5 seconds;
+    new transactions trigger a table refresh and a real browser `Notification` (after a one-time
+    permission click) whose `onclick` opens straight to that transaction's correction form.
+  - **Real Gmail push (Watch API + Cloud Pub/Sub) was considered and explicitly not adopted** —
+    it requires a public HTTPS endpoint, in tension with the local-first deployment model
+    (ADR-0002). The 1-second poll interval originally requested was also reconsidered after
+    discussion: REQUIREMENTS.md §7 Assumption 8 already states sub-minute detection isn't
+    required, and the bank's own email delivery lag dominates real latency regardless of poll
+    speed. See [DECISIONS.md](DECISIONS.md) ADR-0019 for the full reasoning, presented to and
+    agreed with the owner before building.
+  - **Bug found and fixed via live verification:** the polling hook's baseline-tracking used
+    `lastSeenId === null` as its "have I established a baseline" signal, which broke when zero
+    transactions existed at page load — the first genuinely new transaction was silently
+    absorbed into the (still-null) baseline instead of triggering a refresh. Fixed with an
+    explicit `hasBaseline` flag. Caught by inserting a transaction into an empty database and
+    watching the dashboard fail to react.
+  - 131/131 backend tests passing (10 new) on macOS and the Ubuntu VM.
+
+### Added (code)
+- **Epic F (Dashboard: Review & Correction) complete (2026-07-19)** — all five stories (F1–F5):
+  - **F1 (transaction list):** `frontend/src/components/TransactionsView.tsx` — every E1 filter
+    exposed (payee, category, date range, amount range, method, type, free-text), plus pagination.
+  - **F2 (detail + correction form):** `TransactionDetailPanel.tsx` — opens from a table row (F1)
+    or a needs-review item (F4); every E3-editable field has a control; Save calls E3, "Not a
+    real expense" calls E4 (both act on the same transaction, so both live in one panel).
+  - **F3 (source email viewer):** a toggle inside the same panel. Renders the cached email
+    content as plain escaped text (`<pre>`), never via `dangerouslySetInnerHTML` — it's untrusted
+    external HTML (a real bank email; ADR-0006), so rendering it as trusted markup would be a
+    real stored-XSS vector.
+  - **F4 (needs-review queue view):** `NeedsReviewView.tsx` — lists both unmatched emails and
+    low-confidence transactions (E5); a new small endpoint,
+    `POST /needs-review/emails/{id}/ignore` (`app/application/ignore_needs_review_email.py`,
+    confirmed with the user before building since it's beyond E1-E7's original scope), reuses the
+    previously-unused `EmailMessageStatus.IGNORED` so an unmatched email — which has no
+    `Transaction` for E4's dismiss to act on — can still be cleared from the queue.
+  - **F5 (inline category creation):** the category picker in `TransactionDetailPanel` has a
+    "+ New category…" option; saving calls `POST /categories` (E6) then `PATCH /transactions/{id}`
+    (E3) with the new id.
+  - No new dependency (e.g. React Router) was added for view navigation — `frontend/src/App.tsx`
+    switches between the two current views with plain `useState`.
+  - Verified by directly driving the actual running dashboard (browser automation) through every
+    flow, per the Definition of Done for dashboard stories — not just written and assumed to
+    work. **Found and fixed one real bug this way:** dismissing a low-confidence transaction left
+    it visibly stuck in the needs-review queue, because `get_needs_review_queue` never checked
+    `dismissed`, only `review_status` (which dismissing doesn't change). Fixed; regression test
+    added. 121/121 backend tests passing (4 new) on macOS and the Ubuntu VM.
+  - **Not verified against the Ubuntu VM specifically this time** — the SSH tunnel needed for a
+    live browser pass against the VM's dashboard didn't persist reliably in this session's tool
+    environment (see ARCHITECTURE.md §7/§8 for the full note); `scripts/dev.py` was confirmed to
+    start cleanly on the VM directly, just not tunneled to a browser this session. Also found and
+    manually cleaned up an orphaned process from an earlier session that had been silently
+    squatting on the VM's port 8000 for hours, undetected by `vm_dev.py`'s existing cleanup
+    patterns — noted as a real, if minor, tooling gap, not yet fixed.
+
+### Added (code)
 - **Epic E (API Layer) complete (2026-07-19)** — all seven stories (E1–E7):
   - **E1 (list/search):** `GET /transactions` (`app/application/list_transactions.py` +
     `app/presentation/transactions_router.py`) — filters by payee (substring), category, date

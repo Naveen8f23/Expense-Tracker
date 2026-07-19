@@ -77,3 +77,23 @@ def list_transactions(
         .all()
     )
     return items, total
+
+
+def get_transactions_since(session: Session, user: User, since_id: int) -> list[Transaction]:
+    """Transactions created after `since_id`, in creation order -- for the dashboard to poll and
+    detect newly-arrived transactions (from the SyncScheduler) to notify about. Ordered by `id`
+    ascending (creation order), unlike `list_transactions`' txn_date ordering: a backfilled older
+    transaction can be inserted after a newer one, so `id` is the only reliable "just arrived"
+    signal. Dismissed transactions are excluded -- nothing to notify about there.
+    """
+    return (
+        session.query(Transaction)
+        .join(Payee, Transaction.payee_id == Payee.id)
+        .filter(
+            Transaction.user_id == user.id,
+            Transaction.id > since_id,
+            Transaction.dismissed.is_(False),
+        )
+        .order_by(Transaction.id.asc())
+        .all()
+    )

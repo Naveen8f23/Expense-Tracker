@@ -27,6 +27,11 @@ def get_needs_review_queue(session: Session, user: User) -> NeedsReviewQueue:
         .filter(
             Transaction.user_id == user.id,
             Transaction.review_status == ReviewStatus.NEEDS_REVIEW,
+            # Found via live browser verification (Epic F): once the user has dismissed a
+            # transaction (E4, "not a real expense"), it must stop nagging for review -- the
+            # user has already made the decision that matters, even though its review_status
+            # technically never changes from NEEDS_REVIEW.
+            Transaction.dismissed.is_(False),
         )
         .all()
     )

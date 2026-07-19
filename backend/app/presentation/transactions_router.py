@@ -14,7 +14,11 @@ from sqlalchemy.orm import Session
 
 from app.application.correct_transaction import TransactionCorrection, correct_transaction
 from app.application.dismiss_transaction import dismiss_transaction
-from app.application.list_transactions import TransactionFilters, list_transactions
+from app.application.list_transactions import (
+    TransactionFilters,
+    get_transactions_since,
+    list_transactions,
+)
 from app.application.transaction_errors import TransactionNotFoundError
 from app.infrastructure.bootstrap import ensure_default_user
 from app.infrastructure.db import get_db
@@ -67,6 +71,18 @@ def list_transactions_endpoint(
         "limit": limit,
         "offset": offset,
     }
+
+
+@router.get("/recent")
+def get_recent_transactions_endpoint(
+    since_id: int = Query(default=0, ge=0), session: Session = Depends(get_db)
+) -> dict:
+    """For the dashboard to poll (alongside the SyncScheduler background thread) and detect
+    newly-arrived transactions to notify about -- registered before "/{transaction_id}" so
+    "recent" is never mistaken for a transaction id."""
+    user = ensure_default_user(session)
+    items = get_transactions_since(session, user, since_id)
+    return {"items": [serialize_transaction(t) for t in items]}
 
 
 @router.get("/{transaction_id}")

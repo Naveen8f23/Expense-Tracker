@@ -168,6 +168,52 @@ class TestListTransactions:
         assert len(body["items"]) == 2
 
 
+class TestGetRecentTransactions:
+    def test_returns_only_transactions_created_after_since_id(self, client):
+        test_client, session_factory = client
+        session = session_factory()
+        user = ensure_default_user(session)
+        first = _make_transaction(session, user, amount="10.00", payee_identifier="a@x")
+        second = _make_transaction(session, user, amount="20.00", payee_identifier="b@x")
+        first_id, second_id = first.id, second.id
+        session.close()
+
+        response = test_client.get("/transactions/recent", params={"since_id": first_id})
+
+        assert response.status_code == 200
+        body = response.json()
+        assert [item["id"] for item in body["items"]] == [second_id]
+
+    def test_since_id_zero_returns_everything(self, client):
+        test_client, session_factory = client
+        session = session_factory()
+        user = ensure_default_user(session)
+        _make_transaction(session, user)
+        session.close()
+
+        response = test_client.get("/transactions/recent")
+
+        assert len(response.json()["items"]) == 1
+
+    def test_excludes_dismissed_transactions(self, client):
+        test_client, session_factory = client
+        session = session_factory()
+        user = ensure_default_user(session)
+        _make_transaction(session, user, dismissed=True)
+        session.close()
+
+        response = test_client.get("/transactions/recent")
+
+        assert response.json()["items"] == []
+
+    def test_the_literal_path_recent_is_not_swallowed_by_the_transaction_id_route(self, client):
+        # Regression guard: "/transactions/recent" must resolve to this endpoint, not be parsed
+        # as GET /transactions/{transaction_id} with transaction_id="recent" (which would 422).
+        test_client, _ = client
+        response = test_client.get("/transactions/recent")
+        assert response.status_code == 200
+
+
 class TestGetTransaction:
     def test_returns_transaction_with_source_email(self, client):
         test_client, session_factory = client

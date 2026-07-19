@@ -1,8 +1,12 @@
 # Backlog
 
-Status: **v0.6 — Epics A-D done, verified, and merged to main (2026-07-19; PR #3, PR #4). Epic E
-(API Layer) also done and verified (2026-07-19), not yet merged. Epic F (Dashboard: Review &
-Correction) is next, not yet started.**
+Status: **v0.9 — Epics A-E (Foundation through API Layer) done, verified, and merged to main
+(2026-07-19; PR #1-#5). Epic F (Dashboard: Review & Correction), H3 (packaging/run script), and
+H4 (automatic background sync) also done and verified (2026-07-19). The Ubuntu VM is now the
+owner's actual, permanent, day-to-day instance (ADR-0020) — running as a persistent
+`systemd --user` service with its own independent (freshly-connected, not migrated) Gmail
+history; the local Mac instance has been stopped. Epic G (Search & Analytics, MVP complete) is
+next, not yet started.**
 
 This is the detailed, implementation-level breakdown of [ROADMAP.md](ROADMAP.md) milestones
 M2–M5, into units small enough to pick up and build one at a time. ROADMAP.md stays
@@ -647,58 +651,119 @@ migration (`dcdef4f896b2`) was applied to both the local and VM real databases.
 ## Epic E — Status: Done (2026-07-19)
 
 All seven stories (E1–E7) complete. No dashboard exists yet to drive these endpoints through a
-browser (that's Epic F) — verified via automated tests (TestClient) against the real request/
-response contract, per the Definition of Done for backend/logic stories. Per the epic-checkpoint
-policy (ADR-0014), this is the point for a demo and the owner's go-ahead before Epic F (Dashboard:
-Review & Correction) begins.
+browser (that's Epic F) — verified via automated tests (TestClient), and additionally by starting
+the real server against a throwaway database and exercising every endpoint live with curl, per
+the Definition of Done for backend/logic stories. Demoed and confirmed by the owner; committed and
+merged to main via [PR #5](https://github.com/Naveen8f23/Expense-Tracker/pull/5), per the
+epic-checkpoint policy (ADR-0014).
 
 ---
 
 ## Epic F — Dashboard: Review & Correction (ROADMAP.md M4)
 
-### F1. Transaction list/table view
+**Addendum discovered while planning F4 (2026-07-19):** F4's "each item can be... dismissed"
+doesn't work as written for the *unmatched-email* half of the needs-review queue — E4's dismiss
+only operates on a `Transaction`, and an unmatched email has none. Added a small new endpoint,
+`POST /needs-review/emails/{id}/ignore` (`app/application/ignore_needs_review_email.py`), reusing
+the previously-unused `EmailMessageStatus.IGNORED` value, so the dashboard has a real action for
+this case. Confirmed with the user before building (not assumed).
+
+### F1. Transaction list/table view ✅
 **As** the owner-operator, **I want** to see my transactions in a searchable/filterable table,
 **so that** I can browse my spending (SRCH-1).
 
 **Acceptance criteria:** filters from E1 are all exposed in the UI; table is usable with a few
-hundred rows without noticeable lag.
+hundred rows without noticeable lag. ✅ `frontend/src/components/TransactionsView.tsx` — every
+E1 filter (payee, category, date range, amount range, method, type, free-text) plus pagination
+controls.
 
 **Depends on:** E1, A3. **Size:** M.
 
-### F2. Transaction detail + correction form
+### F2. Transaction detail + correction form ✅
 **As** the owner-operator, **I want** to open a transaction and edit any field, **so that** I
 can fix mistakes (COR-1).
 
 **Acceptance criteria:** every editable field from E3 has a form control; saving calls E3 and
-reflects immediately in F1's table.
+reflects immediately in F1's table. ✅ `frontend/src/components/TransactionDetailPanel.tsx` —
+opens as a side panel from a table row (F1) or a needs-review item (F4); a "Not a real expense"
+button (E4) is included alongside Save, since both act on the same transaction.
 
 **Depends on:** E2, E3, F1. **Size:** M.
 
-### F3. Source email viewer
+### F3. Source email viewer ✅
 **As** the owner-operator, **I want** to see the original email a transaction came from,
 **so that** I can verify the extraction (TRC-2).
 
-**Acceptance criteria:** accessible from F2; shows the cached email content from E2.
+**Acceptance criteria:** accessible from F2; shows the cached email content from E2. ✅ A
+"View source email" toggle inside `TransactionDetailPanel`. **Security note:** the cached content
+is untrusted external HTML (a real bank/UPI email; ADR-0006 explicitly deferred, not eliminated,
+phishing-hardening). It is rendered as plain escaped text inside a `<pre>`, never via
+`dangerouslySetInnerHTML` — rendering it as trusted HTML would be a real stored-XSS vector.
 
 **Depends on:** E2, F2. **Size:** S.
 
-### F4. Needs-review queue view
+### F4. Needs-review queue view ✅
 **As** the owner-operator, **I want** a dedicated screen listing everything needing my
 attention, **so that** nothing gets missed (EXT-5, EXT-6).
 
 **Acceptance criteria:** lists items from E5; each item can be corrected (reuses F2) or
-dismissed (reuses E4 pattern).
+dismissed (reuses E4 pattern). ✅ `frontend/src/components/NeedsReviewView.tsx` — unmatched
+emails get "View" (raw content, same safe rendering as F3) and "Ignore" (the new endpoint above);
+low-confidence transactions get "Review", opening the same `TransactionDetailPanel` as F2/F1.
 
 **Depends on:** E5, F2. **Size:** M.
 
-### F5. Category creation/assignment UI
+**Bug found and fixed via live browser verification:** dismissing a low-confidence transaction
+("Not a real expense") left it visibly stuck in the needs-review queue — `get_needs_review_queue`
+filtered only by `review_status == NEEDS_REVIEW` and never checked `dismissed`, because dismissing
+a transaction doesn't change its `review_status`. Fixed by also excluding `dismissed=True` rows;
+regression test added (`test_a_dismissed_transaction_no_longer_appears_in_the_queue`). This is
+exactly the kind of thing the "drive the actual running UI" Definition of Done exists to catch —
+found by clicking through the real flow, not by reasoning about the code.
+
+### F5. Category creation/assignment UI ✅
 **As** the owner-operator, **I want** to create and assign categories directly from a
 transaction, **so that** categorizing is a single smooth action, not a side trip.
 
 **Acceptance criteria:** category picker on F2 supports "create new" inline; calls E6 and E3
-together.
+together. ✅ The category `<select>` in `TransactionDetailPanel` has a "+ New category…" option
+that reveals a name field; saving calls `POST /categories` (E6) then `PATCH /transactions/{id}`
+(E3) with the new category's id, verified live (created "Friends & Family" inline, transaction
+list updated immediately with the new category shown).
 
 **Depends on:** E6, F2. **Size:** S.
+
+Verified by directly driving the running dashboard (browser automation) through every flow above
+against a seeded local backend — not just written and assumed to work, per the Definition of Done
+for dashboard stories. **Not verified against the Ubuntu VM specifically**, unlike prior epics:
+`scripts/vm_test.py`'s 121/121 backend pass confirms the backend logic is cross-platform-correct
+(the actual risk ADR-0016 was about), and `scripts/dev.py` was confirmed to start both the backend
+and Vite dev server correctly on the VM directly (its own log showed a clean startup), but the
+SSH-tunneled *browser* pass against the VM's frontend couldn't be completed in this session due
+to the tunnel not persisting reliably in the tool environment used — a tooling gap, not a finding
+about the app. The dashboard itself is plain client-side React/Vite with no OS-specific code path,
+so this is a materially lower-risk gap than the backend/interpreter divergence ADR-0016 covers.
+Revisit if `scripts/vm_dev.py`'s tunnel proves flaky in normal use too, not just in this session.
+
+**Also found and cleaned up (unrelated to this epic's code):** an orphaned `multiprocessing`
+worker process on the VM, left over from an earlier `--reload`-mode session, had been silently
+squatting on port 8000 for hours. It wasn't matched by `vm_dev.py`'s existing pkill patterns
+(its command line doesn't contain `uvicorn app.presentation.main`), causing new backend starts
+to silently fail to bind while an old process kept answering health checks. Killed manually;
+not yet fixed in the tooling itself (a real, if minor, gap in ADR-0017's cleanup patterns) —
+flagged here rather than left for the next person to rediscover.
+
+---
+
+## Epic F — Status: Done (2026-07-19)
+
+All five stories (F1–F5) complete, verified by directly driving the running dashboard through
+every flow (table filtering, opening a transaction, editing it, viewing its source email,
+creating and assigning a category inline, dismissing a transaction, ignoring an unmatched email)
+against a seeded local backend. One real bug found and fixed this way (dismissed transactions
+stuck in the needs-review queue — see F4 above); zero bugs found in F1/F2/F3/F5's own flows.
+Per the epic-checkpoint policy (ADR-0014), this is the point for a demo and the owner's go-ahead
+before Epic G (Search & Analytics, MVP complete) begins.
 
 ---
 
@@ -763,14 +828,59 @@ the norm.
 
 **Depends on:** E3, F2. **Size:** S.
 
-### H3. Packaging/run script
+### H3. Packaging/run script ✅
 **As** the owner-operator, **I want** a clean, documented way to start the whole system,
 **so that** running this day-to-day doesn't require remembering developer setup steps.
 
 **Acceptance criteria:** builds on A4; produces something closer to "double-click to start" or
 a single documented command, once the frontend is built for real use (not just `npm run dev`).
+✅ **Resolved 2026-07-19 (ADR-0020), superseding the original "local double-click" framing:** the
+owner-operator asked for the Ubuntu VM to become the actual, permanent, day-to-day instance (not
+just ADR-0017's test target) — so "day-to-day" now means "always running on the VM," not "start
+it locally each time." The frontend is built for real use (`frontend/dist`, served by the backend
+itself, `app/presentation/main.py`'s static mount — one process, one port, no separate Vite dev
+server) — the literal thing this criterion had been waiting on. Running it is now a
+`systemd --user` service (`deploy/expense-tracker.service`, `deploy/README.md`) that auto-starts,
+auto-restarts, and needs no manual command day-to-day at all — stronger than "double-click," it
+just stays up. `scripts/deploy_vm.py` is the single command for pushing a future code change live
+(sync, deps, migrations, frontend rebuild, service restart).
 
 **Depends on:** A4, and practically, most of the rest of the backlog. **Size:** M.
+
+### H4. Automatic background sync + live dashboard updates ✅
+**As** the owner-operator, **I want** new transactions to appear on the dashboard on their own,
+**so that** I never need a manual "sync now" action, and can react to a new transaction (assign
+its category) about as fast as if I'd gotten a push notification for it.
+
+**Acceptance criteria (added 2026-07-19, requested live during Epic F testing):**
+- The backend polls the connected Gmail account and runs classify/extract automatically, with no
+  manual trigger. ✅ `SyncScheduler` (`app/infrastructure/sync_scheduler.py`) — a background
+  thread, 5-second default interval, started/stopped from FastAPI's lifespan hook. See ADR-0019
+  for why 5 seconds, not the 1 second first requested, and why this is a local poll rather than
+  Gmail's real push API.
+- The dashboard reflects new transactions without a page reload. ✅ New
+  `GET /transactions/recent?since_id=` endpoint +
+  `frontend/src/hooks/useNewTransactionNotifications.ts`, polled every 5 seconds; detected new
+  transactions force a table refresh regardless of the currently-active filters.
+- Getting alerted to a new transaction feels like a push notification, clickable straight to
+  correcting/categorizing it. ✅ A real browser `Notification` (after a one-time permission grant
+  — browsers require a user gesture, it can't be requested silently) whose `onclick` opens that
+  transaction's `TransactionDetailPanel` (F2) directly.
+
+**Depends on:** B4, C7, E1, F1, F2. **Size:** M.
+
+Tests: `backend/tests/test_sync_scheduler.py` (6 tests: runs, skips gracefully with no
+connection, skips gracefully with no backfill yet, survives a failing cycle, idempotent start),
+`backend/tests/test_transactions_routes.py::TestGetRecentTransactions` (4 tests, including a
+regression guard that `/transactions/recent` isn't swallowed by the `/{transaction_id}` route).
+131/131 backend tests passing on macOS and the Ubuntu VM.
+
+**Bug found and fixed via live verification:** the frontend polling hook tracked "has a baseline
+been established" as `lastSeenId === null`, which broke when zero transactions existed at page
+load — the first real new transaction afterward was silently absorbed into the (still-null)
+baseline instead of triggering a refresh. Caught by inserting a transaction into an empty
+database and watching the dashboard fail to react; fixed with an explicit `hasBaseline` flag
+independent of what `lastSeenId` happens to be. See ARCHITECTURE.md §8 for the full note.
 
 ---
 _Revision history: track major changes here in [CHANGELOG.md](CHANGELOG.md). Architectural
