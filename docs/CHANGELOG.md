@@ -40,6 +40,17 @@ versioned releases begin.
   I3 updated to name this specific mechanism.
 
 ### Added (code)
+- **Epic J complete: J5-J7 (2026-07-19), closing out Epic J entirely.** J5 (swipe actions) adds
+  native `swipeActions` to each list row — Edit opens J3's sheet, Dismiss calls
+  `POST /transactions/{id}/dismiss` directly and removes the row locally. J6 (category management)
+  adds a new "Manage categories" screen (full CRUD, including the reassign-on-delete flow for a
+  category still in use) reached from a gear-adjacent toolbar icon, plus an inline "+ New
+  category…" option in J3's picker — two real SwiftUI alert/dismiss race bugs were found and fixed
+  via live verification (an alert's `isPresented` binding must not be derived from the same state
+  its own action reads, since dismissal and the action can run out of order). J7 (sync-health
+  indicator) adds a small colored nav-bar dot reflecting `GET /sync/status`, tappable for the full
+  scanned/matched/skipped/failed breakdown. 52/52 iOS unit tests passing (18 new); every story
+  additionally verified live via the demo XCUITest harness against the real local backend.
 - **Epic J: J4 (Source email viewer) complete (2026-07-19).** New
   `Views/SourceEmailView.swift`, reached via a "View source email" row in
   `TransactionDetailView` (shown only when `sourceEmail` is populated — manual entries keep J3's

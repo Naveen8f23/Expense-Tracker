@@ -62,6 +62,19 @@ final class TransactionDetailStore: ObservableObject {
         }
     }
 
+    /// BACKLOG.md J6 — inline "+ New category…" from the detail sheet's picker (mirrors web F5).
+    /// Returns the created `Category` so the caller can select it and add it to the picker's
+    /// local options without waiting for a full categories refresh.
+    func createCategory(baseURL: URL?, name: String) async -> Category? {
+        guard let baseURL else { return nil }
+        do {
+            return try await makeClient(baseURL).createCategory(name: name)
+        } catch {
+            errorMessage = Self.describe(error)
+            return nil
+        }
+    }
+
     private static func describe(_ error: Error) -> String {
         (error as? APIError)?.errorDescription ?? error.localizedDescription
     }

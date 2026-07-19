@@ -79,6 +79,31 @@ final class TransactionDetailStoreTests: XCTestCase {
         XCTAssertNotNil(store.errorMessage)
     }
 
+    func testCreateCategoryReturnsTheCreatedCategory() async {
+        let stub = StubURLSession { request in
+            if request.httpMethod == "POST" {
+                return StubURLSession.json(#"{"id":9,"name":"Bills"}"#)
+            }
+            return StubURLSession.json(Self.transactionJSON(dismissed: false))
+        }
+        let store = TransactionDetailStore { APIClient(baseURL: $0, session: stub) }
+
+        let created = await store.createCategory(baseURL: baseURL, name: "Bills")
+
+        XCTAssertEqual(created?.id, 9)
+        XCTAssertEqual(created?.name, "Bills")
+    }
+
+    func testCreateCategoryFailureSurfacesErrorAndReturnsNil() async {
+        let stub = StubURLSession { _ in StubURLSession.json(#"{"detail": "boom"}"#, status: 500) }
+        let store = TransactionDetailStore { APIClient(baseURL: $0, session: stub) }
+
+        let created = await store.createCategory(baseURL: baseURL, name: "Bills")
+
+        XCTAssertNil(created)
+        XCTAssertNotNil(store.errorMessage)
+    }
+
     private static func transactionJSON(dismissed: Bool, amount: String = "120.00") -> String {
         """
         {

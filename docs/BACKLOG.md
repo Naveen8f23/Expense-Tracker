@@ -1119,9 +1119,11 @@ infrastructure work, not an I3 defect.
 
 ## Epic J — Ledger: Transaction List & Correction (mirrors F1–F3, F5)
 
-**Status: J1-J4 done (committed and merged to main via
-[PR #9](https://github.com/Naveen8f23/Expense-Tracker/pull/9), together with Epic I); J5-J7 not
-started.**
+**Status: Done (2026-07-19).** J1-J4 committed and merged to main via
+[PR #9](https://github.com/Naveen8f23/Expense-Tracker/pull/9), together with Epic I. J5-J7
+(this session) complete all seven stories — 52/52 iOS unit tests passing, each story additionally
+verified live via the demo XCUITest harness against the real local backend (the developer's Mac,
+per J1's infrastructure note — ADR-0026 is still unresolved).
 
 ### J1. Transaction list (Ledger tab) ✅
 **As** the owner-operator, **I want** my transaction history on my phone in the same
@@ -1269,40 +1271,111 @@ that** I can verify the extraction from my phone (TRC-2), mirroring F3.
 
 **Depends on:** J3. **Size:** S.
 
-### J5. Swipe actions (Edit / Dismiss)
+### J5. Swipe actions (Edit / Dismiss) ✅
 **As** the owner-operator, **I want** to act on a row without opening it, **so that** quick
 triage is quick, matching the confirmed design's swipe gesture.
 
 **Acceptance criteria:**
 - Native `swipeActions` on each list row: Edit opens J3's sheet; Dismiss calls
-  `POST /transactions/{id}/dismiss` directly.
+  `POST /transactions/{id}/dismiss` directly. ✅ `Views/LedgerListView.swift` — Dismiss (red,
+  destructive) is listed first so it sits at the trailing swipe edge (the full-swipe action,
+  matching "quick triage is quick"); Edit (blue) sits next to it, opening J3's existing sheet. New
+  `TransactionListStore.dismissTransaction(baseURL:id:)` calls the endpoint directly and removes
+  the row from the local list on success (E1 already excludes dismissed rows server-side, so
+  there's nothing to wait for a reload for); failures surface via a new `actionErrorMessage` +
+  alert, distinct from the list's own load-error state.
+
+**Verified:** 2 new unit tests (`LedgerTests/TransactionListStoreTests.swift`, 36/36 total passing)
+covering the success path (row removed, total decremented) and a server-error path (row kept,
+error surfaced). **Also verified live** via the demo XCUITest harness against the real local
+backend: swiping revealed both actions, Edit opened the detail sheet, and Dismiss removed the row
+immediately — confirmed via `curl` that the transaction's `dismissed` field flipped to `true`
+server-side.
 
 **Depends on:** J1, J3. **Size:** S.
 
-### J6. Category management + inline "+ New category"
+### J6. Category management + inline "+ New category" ✅
 **As** the owner-operator, **I want** to create and assign categories directly from a transaction,
 **so that** categorizing stays a single action (mirrors F5/E6).
+
+**Scope note (resolved via AskUserQuestion, 2026-07-19):** unlike the web dashboard (F5, which only
+ever built inline "+ New category" creation), this story's acceptance criteria call for genuine
+full CRUD — rename and delete-with-reassignment have no existing UI to mirror. The owner chose a
+dedicated **"Manage categories" screen reached from a new gear-adjacent toolbar icon** (the same
+one-tap-deeper pattern I3 established for Connection Settings) over deferring rename/delete to a
+later story.
 
 **Acceptance criteria:**
 - Full CRUD via `GET`/`POST`/`PATCH`/`DELETE /categories`, including the reassign-on-delete flow
   (a delete without `reassign_to` on an in-use category surfaces E6's 409 + affected count, not a
-  silent failure or an orphaned reference).
-- The category picker in J3 supports "+ New category…" inline, creating then assigning in one flow.
+  silent failure or an orphaned reference). ✅ New `ViewState/CategoryManagementStore.swift` +
+  `Views/CategoryManagementView.swift`: create (inline text field + Add), rename (swipe → alert
+  with a pre-filled text field), delete (swipe → either an immediate remove, or — if the backend
+  409s — a `pendingReassignment` state driving a `ReassignmentSheet` listing every other category
+  as a reassignment target; there is no "delete anyway" option, matching the backend's own
+  contract).
+- The category picker in J3 supports "+ New category…" inline, creating then assigning in one
+  flow. ✅ `TransactionDetailView` — a sentinel picker option reveals an alert text field; the
+  created category is appended to a local `newlyCreatedCategories` array and immediately selected,
+  so the picker shows it as the current value without a second trip through the menu (verified
+  live, see below).
+
+**Two real bugs found and fixed via live UI verification (not by reasoning about the code, per the
+project's Definition of Done):**
+1. **Rename silently no-op'd.** The rename alert's `isPresented` binding was derived from the same
+   optional (`categoryBeingRenamed != nil`) the Save action's async body read — tapping Save
+   dismisses the alert, which (via that binding) nil'd the category out *before* the `async`
+   `performRename()` task actually ran, so it read `nil` and returned early. Fixed by decoupling
+   presentation (`showingRenameAlert: Bool`) from data (`categoryBeingRenamed: Category?`) — the
+   same class of bug, and the same fix shape, applies to any SwiftUI alert/sheet whose dismissal
+   and its own button action both mutate the same piece of state.
+2. **The exact same race in the reassignment sheet.** Tapping a reassignment target called
+   `onReassign` (unawaited, inside a `Task`) then `dismiss()` immediately — dismissal cleared
+   `store.pendingReassignment` before the queued task read it. Fixed by awaiting the reassign call
+   before dismissing, so the store's state stays valid for the whole operation.
+
+**Also surfaced (real, now fixed):** dismissing "Manage Categories" only refreshed the category
+*dropdown* (`store.refreshCategories`), not the transaction list itself — a transaction moved by a
+reassign-and-delete kept showing its old (now-deleted) category name until the next manual
+refresh. Fixed by also calling `reload()` in the sheet's `onDismiss`.
+
+**Verified:** 9 new `CategoryManagementStoreTests` + 2 new `TransactionDetailStoreTests`
+(`createCategory`), 45/45 total passing. **Also verified live** via two demo XCUITest walkthroughs
+against the real local backend: create → rename → assign to a real transaction → delete-while-in-
+use → reassignment sheet → confirm → transaction correctly shows the new category, deleted
+category confirmed gone on a fresh load (`testJ6CategoryManagement`); and the inline "+ New
+category…" flow creating and assigning a category in one trip without leaving J3's sheet
+(`testJ6InlineNewCategoryFromDetailPicker`).
 
 **Depends on:** J3. **Size:** S.
 
-### J7. Sync-health indicator
+### J7. Sync-health indicator ✅
 **As** the owner-operator, **I want** to see at a glance whether sync is healthy, **so that** I
 never wonder if Ledger (or the VM) is silently broken (ING-8), mirroring the confirmed design's
 nav-bar dot.
 
 **Acceptance criteria:**
 - A small colored dot (or equivalent) in the Ledger tab, calling `GET /sync/status`; tapping it
-  shows the same scanned/matched/skipped/failed counts the endpoint already returns.
+  shows the same scanned/matched/skipped/failed counts the endpoint already returns. ✅ New
+  `ViewState/SyncHealthStore.swift` (framework-agnostic — classifies `SyncStatus` into a plain
+  `Health` enum: `notConnected` / `pendingFirstSync` / `healthy` / `issues`, no SwiftUI import,
+  matching the other stores) + `Views/SyncHealthView.swift`. A small `Circle` toolbar button in
+  `LedgerListView` maps `Health` to a color (gray/yellow/green/red) and opens the detail sheet on
+  tap.
 - Pull-to-refresh re-fetches the current transaction list/state. **Explicitly out of scope:**
   there is no endpoint to trigger a new Gmail sync on demand — the VM's `SyncScheduler`
   (ADR-0019) already runs independently every 5 seconds regardless of whether Ledger is open, so
-  pull-to-refresh is for reassurance and immediacy, not for making the VM check Gmail sooner.
+  pull-to-refresh is for reassurance and immediacy, not for making the VM check Gmail sooner. ✅
+  `.refreshable` (already present from J1) and the initial `.task` both now also call
+  `syncHealthStore.load`; no new sync-trigger endpoint was added or is called.
+
+**Verified:** 7 new unit tests (`LedgerTests/SyncHealthStoreTests.swift`, 52/52 total passing)
+covering all five health classifications (no connection configured, no Gmail connected yet,
+connected-but-unsynced, healthy, issues via both a failed-count and a `last_error`) plus an
+unreachable-host path. **Also verified live** via the demo XCUITest harness against the real local
+backend: the dot rendered green (`"Sync status: healthy"`, matching the real `GET /sync/status`
+response), and tapping it showed the actual scanned/matched/skipped/failed counts and last-sync
+timestamp.
 
 **Depends on:** J1. **Size:** S.
 

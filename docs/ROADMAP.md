@@ -145,7 +145,9 @@ Copy this block per milestone:
   confirmed by the owner; native Swift + SwiftUI was chosen over a cross-platform framework
   (ADR-0023); push notifications will be in-app/foreground-only, not Apple Push and not a
   third-party relay, after both were presented and declined (ADR-0024). Detailed story breakdown
-  in [BACKLOG.md](BACKLOG.md) Epics I–M.
+  in [BACKLOG.md](BACKLOG.md) Epics I–M. **Progress (2026-07-19):** Epic I (foundation) and Epic J
+  (transaction list & correction, J1-J7) both done. Epics K (needs-review queue), L (analytics),
+  and M (manual add & notifications) not started.
 
 ### M8: Multi-User Support
 - **Status:** Planned
