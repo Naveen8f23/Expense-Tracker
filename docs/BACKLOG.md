@@ -1,20 +1,17 @@
 # Backlog
 
-Status: **v1.0 — Epics A-F (Foundation through Dashboard: Review & Correction), plus H3
-(packaging/run script) and H4 (automatic background sync), done, verified, and merged to main
-(2026-07-19; PR #1-#6). The Ubuntu VM is now the owner's actual, permanent, day-to-day instance
-(ADR-0020) — running as a persistent `systemd --user` service with its own independent
-(freshly-connected, not migrated) Gmail history; the local Mac instance has been stopped.
-Epic G (Search & Analytics, MVP complete) is done, verified (144/144 backend tests passing on
-macOS and the Ubuntu VM), demoed live on the production VM, confirmed by the owner, and merged to
-main (2026-07-19; PR #7) — this completes REQUIREMENTS.md §13's MVP definition (modulo the
-still-pending 4th email template). Two same-day follow-ups the owner requested during/after the
-demo are included in the same change: showing (real-or-approximate) transaction time next to the
-date everywhere, and fixing same-day sort order to actually follow that time instead of database
-insertion order. Epic H (Cross-cutting polish) is now also done, verified (148/148 backend tests
-passing), and demoed live (2026-07-19) — H1 (encryption verification) was already satisfied by an
-Epic A test; H2 (manual add-transaction escape hatch, ADR-0022) is new work, built and pending
-commit/merge.**
+Status: **v1.0 — All eight epics (A-H) are done, verified, and merged to main (2026-07-19;
+PR #1-#8).** This is every story originally planned in this file — see "Epic Overview" below and
+each epic's own status block for what was built and how it was verified. Foundation through
+Dashboard (A-F), packaging (H3), and automatic sync (H4) merged first (PR #1-#6); Search &
+Analytics (G) — which completes REQUIREMENTS.md §13's MVP definition — merged next (PR #7),
+along with two same-day follow-ups (transaction time display, time-based sort order); Epic H's
+remaining stories (H1, already satisfied by an Epic A test; H2, the manual add-transaction escape
+hatch, ADR-0022) merged last (PR #8). The Ubuntu VM is the owner's actual, permanent, day-to-day
+instance (ADR-0020) — a persistent `systemd --user` service with its own independent Gmail
+history; the local Mac instance has been stopped. The only requirement not yet fully met is the
+still-pending 4th email template (credit card credit, REQUIREMENTS.md §8), which was never tied
+to any specific epic — see [ROADMAP.md](ROADMAP.md) for what's next post-MVP.**
 
 This is the detailed, implementation-level breakdown of [ROADMAP.md](ROADMAP.md) milestones
 M2–M5, into units small enough to pick up and build one at a time. ROADMAP.md stays
@@ -260,10 +257,11 @@ ING-5, ING-6).
   the last successful sync time (not ADR-0011's original backfill-month window), and re-plants
   a fresh checkpoint.
 
-**Scope note (explicit decision, not yet built):** nothing automatically calls
-`run_incremental_sync` on a schedule yet. The sync mechanism itself is correct and tested; an
-in-process scheduler (ADR-0013) is deferred until Epic C exists to give newly-synced emails
-somewhere to go — right now they'd just accumulate as `unprocessed` rows either way.
+**Scope note (explicit decision at the time, since superseded by H4):** nothing automatically
+called `run_incremental_sync` on a schedule yet as of this story — the sync mechanism itself was
+correct and tested; an in-process scheduler (ADR-0013) was deferred until Epic C existed to give
+newly-synced emails somewhere to go. **Resolved 2026-07-19:** H4's `SyncScheduler`
+(`app/infrastructure/sync_scheduler.py`) now calls this automatically every 5 seconds (ADR-0019).
 
 Tests: `backend/tests/test_run_incremental_sync.py` (48/48 backend tests passing on macOS and
 the Ubuntu VM).

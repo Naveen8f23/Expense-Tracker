@@ -260,7 +260,7 @@ Tables map directly to [REQUIREMENTS.md](REQUIREMENTS.md) §5 Data Model:
   pointer to the transaction it produced (if any).
 - `sync_state` — per-connection checkpoint (last `historyId`, last sync started/completed time,
   last error) plus, since B5, the last run's scanned/matched/skipped/failed message counts
-  (ING-8) — a dedicated API endpoint for reading this is Epic E's E7, not yet built.
+  (ING-8) — exposed via `GET /sync/status` (Epic E's E7, done).
 - `transactions` — amount, currency, date, time (nullable), payee, instrument last-4, category,
   payment method, type, reference number (nullable), confidence score, review status, link to
   its `email_messages` row — **nullable since H2 (ADR-0022, migration `8bcc9bb76003`)**: a
