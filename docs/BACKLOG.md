@@ -1,12 +1,11 @@
 # Backlog
 
-Status: **v0.9 — Epics A-E (Foundation through API Layer) done, verified, and merged to main
-(2026-07-19; PR #1-#5). Epic F (Dashboard: Review & Correction), H3 (packaging/run script), and
-H4 (automatic background sync) also done and verified (2026-07-19). The Ubuntu VM is now the
-owner's actual, permanent, day-to-day instance (ADR-0020) — running as a persistent
-`systemd --user` service with its own independent (freshly-connected, not migrated) Gmail
-history; the local Mac instance has been stopped. Epic G (Search & Analytics, MVP complete) is
-next, not yet started.**
+Status: **v1.0 — Epics A-F (Foundation through Dashboard: Review & Correction), plus H3
+(packaging/run script) and H4 (automatic background sync), done, verified, and merged to main
+(2026-07-19; PR #1-#6). The Ubuntu VM is now the owner's actual, permanent, day-to-day instance
+(ADR-0020) — running as a persistent `systemd --user` service with its own independent
+(freshly-connected, not migrated) Gmail history; the local Mac instance has been stopped.
+Epic G (Search & Analytics, MVP complete) is next, not yet started.**
 
 This is the detailed, implementation-level breakdown of [ROADMAP.md](ROADMAP.md) milestones
 M2–M5, into units small enough to pick up and build one at a time. ROADMAP.md stays
@@ -762,8 +761,10 @@ every flow (table filtering, opening a transaction, editing it, viewing its sour
 creating and assigning a category inline, dismissing a transaction, ignoring an unmatched email)
 against a seeded local backend. One real bug found and fixed this way (dismissed transactions
 stuck in the needs-review queue — see F4 above); zero bugs found in F1/F2/F3/F5's own flows.
-Per the epic-checkpoint policy (ADR-0014), this is the point for a demo and the owner's go-ahead
-before Epic G (Search & Analytics, MVP complete) begins.
+Demoed live (the owner tested it directly, including making real transactions and watching them
+sync), which led straight into H3/H4 the same day. Committed together with H3 and H4 and merged
+to main via [PR #6](https://github.com/Naveen8f23/Expense-Tracker/pull/6), per the
+epic-checkpoint policy (ADR-0014).
 
 ---
 
