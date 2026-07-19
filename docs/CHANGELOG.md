@@ -40,6 +40,24 @@ versioned releases begin.
   I3 updated to name this specific mechanism.
 
 ### Added (code)
+- **Epic L complete: L1-L3 (2026-07-19), the Analytics tab.** New `ViewState/AnalyticsStore.swift`
+  + `Views/AnalyticsView.swift` (monthly summary + category breakdown, sharing one month cursor per
+  ADR-0021) and `ViewState/PayeeHistoryStore.swift` + `Views/PayeeHistoryView.swift` (payee history
+  panel, reached by tapping a payee name in a transaction row or the review queue — a new
+  `PayeeSelection` value drives `.sheet(item:)`). 76/76 iOS unit tests passing (9 new). **Two real
+  SwiftUI bugs found and fixed via live verification, both the same underlying shape:** (1) the
+  month switcher's label and figures stayed frozen after tapping Previous/Next, caused by a
+  `.task` restarting unpredictably when attached to a `List`'s conditional content, compounded by
+  an async month-shift function that *also* called `load()` itself, racing the `.task`; fixed by
+  making month-shifting a pure synchronous function and `.task(id: store.month)` the one trigger,
+  and by moving the month switcher outside the `List` entirely. (2) Tapping a payee always 404'd
+  even for payees confirmed to have real data — traced to `showingPayeeHistory: Bool` and
+  `payeeNameForHistory: String` being two separate `@State` vars set together but read separately
+  by a sheet and its content closure, letting the closure see the String's stale empty default;
+  fixed by replacing both with one `PayeeSelection?` driving `.sheet(item:)`, the same reliable
+  shape `selectedTransaction` already used. Four pre-existing demo UI tests (J4, J5, two J6 tests)
+  needed their payee-row selectors updated too, since the payee display is now its own `Button`
+  rather than plain text — an expected, correct consequence of L3, not a regression.
 - **Epic K complete: K1-K4 (2026-07-19), the needs-review queue.** New `Views/ReviewView.swift`
   (replacing I1's placeholder) + `ViewState/NeedsReviewStore.swift` — lists both halves
   `GET /needs-review` returns as separate sections with reason chips ("Unrecognized" /

@@ -15,7 +15,7 @@ final class LedgerDemoUITests: XCTestCase {
 
         // A real synced transaction (has a source email), not a manual one — NAVEEN V rows are
         // real UPI entries from earlier epic verification.
-        let row = app.staticTexts["NAVEEN V"].firstMatch
+        let row = app.cells.containing(.button, identifier: "NAVEEN V").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         row.tap()
 
@@ -40,7 +40,7 @@ final class LedgerDemoUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.staticTexts["Ledger"].waitForExistence(timeout: 5))
-        let row = app.staticTexts["NAVEEN V"].firstMatch
+        let row = app.cells.containing(.button, identifier: "NAVEEN V").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5))
 
         // Swipe left to reveal the Edit/Dismiss actions.
@@ -106,7 +106,7 @@ final class LedgerDemoUITests: XCTestCase {
         app.navigationBars["Categories"].buttons["Done"].tap()
 
         // Assign the renamed category to a real transaction via J3's picker.
-        let row = app.staticTexts["NAVEEN V"].firstMatch
+        let row = app.cells.containing(.button, identifier: "NAVEEN V").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         row.tap()
         XCTAssertTrue(app.navigationBars["Transaction"].waitForExistence(timeout: 5))
@@ -138,9 +138,13 @@ final class LedgerDemoUITests: XCTestCase {
         // app-wide "does this text exist anywhere" check ambiguous. Dismissing first, and
         // reopening Manage Categories fresh, checks one unambiguous, fully-settled screen state.
         app.navigationBars["Categories"].buttons["Done"].tap()
-        let reassignedRow = app.buttons.matching(
-            NSPredicate(format: "label CONTAINS 'NAVEEN V' AND label CONTAINS 'Groceries'")
-        ).firstMatch
+        // The payee is now its own Button (BACKLOG.md L3), not combined into one big row-wide
+        // accessibility label — check the cell contains both the payee button and the new
+        // category text, rather than a single combined label.
+        let reassignedRow = app.cells
+            .containing(.button, identifier: "NAVEEN V")
+            .containing(.staticText, identifier: "Groceries")
+            .firstMatch
         XCTAssertTrue(reassignedRow.waitForExistence(timeout: 5), "the reassigned transaction must show its new category, not the deleted one")
 
         app.buttons["Manage categories"].tap()
@@ -157,7 +161,7 @@ final class LedgerDemoUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.staticTexts["Ledger"].waitForExistence(timeout: 5))
-        let row = app.staticTexts["NAVEEN V"].firstMatch
+        let row = app.cells.containing(.button, identifier: "NAVEEN V").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         row.tap()
         XCTAssertTrue(app.navigationBars["Transaction"].waitForExistence(timeout: 5))
@@ -182,9 +186,13 @@ final class LedgerDemoUITests: XCTestCase {
 
         app.navigationBars["Transaction"].buttons["Save"].tap()
         XCTAssertTrue(row.waitForExistence(timeout: 5))
-        let updatedRow = app.buttons.matching(
-            NSPredicate(format: "label CONTAINS 'NAVEEN V' AND label CONTAINS 'Inline Snacks'")
-        ).firstMatch
+        // Same reasoning as testJ6CategoryManagement's final check — the payee is its own Button
+        // now (BACKLOG.md L3), so check the cell contains both it and the new category text
+        // rather than one combined row-wide label.
+        let updatedRow = app.cells
+            .containing(.button, identifier: "NAVEEN V")
+            .containing(.staticText, identifier: "Inline Snacks")
+            .firstMatch
         XCTAssertTrue(updatedRow.waitForExistence(timeout: 5), "the saved transaction must show the newly-created category")
         capture(app, "demo_j6_inline_02_saved", scratchDir)
     }
@@ -255,6 +263,44 @@ final class LedgerDemoUITests: XCTestCase {
         let rowGone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: unmatchedRow)
         wait(for: [rowGone], timeout: 10)
         capture(app, "demo_k_05_after_ignore", scratchDir)
+    }
+
+    /// BACKLOG.md Epic L walkthrough — monthly summary + month switcher (L1), category breakdown
+    /// (L2), and tapping a payee name from the list opens the payee history panel (L3).
+    func testEpicLAnalytics() throws {
+        let scratchDir = "/private/tmp/claude-502/-Users-naveen-18163-projects-expense-tracker/c95f4903-6984-4003-a537-c6b6ecf8eb63/scratchpad"
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["Ledger"].waitForExistence(timeout: 5))
+        app.tabBars.buttons["Analytics"].tap()
+        XCTAssertTrue(app.navigationBars["Analytics"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Summary"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["By Category"].exists)
+        capture(app, "demo_l_01_analytics_current_month", scratchDir)
+
+        // L1 — month switcher moves back, re-fetches, and the label changes.
+        let monthLabelBefore = app.staticTexts.matching(NSPredicate(format: "label MATCHES '\\\\d{4}-\\\\d{2}'")).firstMatch.label
+        app.buttons["Previous month"].tap()
+        Thread.sleep(forTimeInterval: 1)
+        let monthLabelAfter = app.staticTexts.matching(NSPredicate(format: "label MATCHES '\\\\d{4}-\\\\d{2}'")).firstMatch.label
+        XCTAssertNotEqual(monthLabelBefore, monthLabelAfter, "month label must change after Previous")
+        capture(app, "demo_l_02_previous_month", scratchDir)
+        app.buttons["Next month"].tap() // back to the current month
+        Thread.sleep(forTimeInterval: 1)
+
+        // L3 — tapping a payee name from the Ledger tab opens the payee history panel.
+        app.tabBars.buttons["Ledger"].tap()
+        XCTAssertTrue(app.staticTexts["Ledger"].waitForExistence(timeout: 5))
+        let payeeButton = app.buttons["NAVEEN V"].firstMatch
+        XCTAssertTrue(payeeButton.waitForExistence(timeout: 5))
+        payeeButton.tap()
+        XCTAssertTrue(app.navigationBars["NAVEEN V"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Transactions"].waitForExistence(timeout: 3))
+        capture(app, "demo_l_03_payee_history", scratchDir)
+
+        app.navigationBars["NAVEEN V"].buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["Ledger"].waitForExistence(timeout: 3))
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {

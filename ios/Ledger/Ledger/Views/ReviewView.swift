@@ -6,6 +6,10 @@ struct ReviewView: View {
     @EnvironmentObject private var connectionSettings: ConnectionSettingsStore
     @ObservedObject var store: NeedsReviewStore
     @State private var selectedTransaction: Transaction?
+    // BACKLOG.md L3 — tapping a low-confidence transaction's payee name opens the payee history
+    // panel instead of K3's detail sheet. A single Identifiable value, not a Bool+String pair —
+    // see PayeeSelection's doc comment for the real race that shape caused.
+    @State private var payeeSelection: PayeeSelection?
 
     var body: some View {
         NavigationStack {
@@ -32,6 +36,9 @@ struct ReviewView: View {
                         // excludes it entirely, either way it should drop out of a fresh fetch.
                         onChanged: { Task { await reload() } }
                     )
+                }
+                .sheet(item: $payeeSelection) { selection in
+                    PayeeHistoryView(payeeName: selection.name)
                 }
                 .task { await reload() }
                 .refreshable { await reload() }
@@ -74,12 +81,13 @@ struct ReviewView: View {
                 if !store.lowConfidenceTransactions.isEmpty {
                     Section("Needs Review") {
                         ForEach(store.lowConfidenceTransactions) { transaction in
-                            Button {
-                                selectedTransaction = transaction
-                            } label: {
-                                lowConfidenceRow(transaction)
+                            // Same reasoning as LedgerListView's rows (BACKLOG.md L3): the payee
+                            // name is its own tappable target, so the row can't be one big Button.
+                            lowConfidenceRow(transaction) {
+                                payeeSelection = PayeeSelection(name: transaction.payee.name)
                             }
-                            .buttonStyle(.plain)
+                            .contentShape(Rectangle())
+                            .onTapGesture { selectedTransaction = transaction }
                         }
                     }
                 }
@@ -104,12 +112,16 @@ struct ReviewView: View {
     }
 
     @ViewBuilder
-    private func lowConfidenceRow(_ transaction: Transaction) -> some View {
+    private func lowConfidenceRow(_ transaction: Transaction, onPayeeTapped: @escaping () -> Void) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(transaction.payee.name)
-                    .font(.body)
-                    .foregroundStyle(.primary)
+                Button(action: onPayeeTapped) {
+                    Text(transaction.payee.name)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                        .underline()
+                }
+                .buttonStyle(.plain)
                 Text(TransactionDisplayTime.string(for: transaction))
                     .font(.caption)
                     .foregroundStyle(.secondary)

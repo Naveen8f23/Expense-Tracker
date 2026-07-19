@@ -17,6 +17,14 @@ struct LedgerListView: View {
     @StateObject private var syncHealthStore = SyncHealthStore()
     @State private var selectedTransaction: Transaction?
     @State private var debounceTask: Task<Void, Never>?
+    // BACKLOG.md L3 — separate from `selectedTransaction`: tapping a payee name opens the payee
+    // history panel instead of the transaction detail sheet. A single `Identifiable` optional
+    // (mirroring `selectedTransaction` itself), not two separate state vars — two vars (a Bool
+    // plus a String) briefly held the wrong data live: presenting a `.sheet(isPresented:)` whose
+    // content closure reads a *different* @State than the one driving `isPresented` raced against
+    // this view's own body re-evaluating for unrelated reasons, and the sheet ended up reading
+    // the String's stale default. One value can't be internally inconsistent with itself.
+    @State private var payeeSelection: PayeeSelection?
 
     var body: some View {
         NavigationStack {
@@ -83,6 +91,9 @@ struct LedgerListView: View {
                 }
                 .sheet(isPresented: $showingFilters, onDismiss: { Task { await reload() } }) {
                     TransactionFilterSheet(filters: $filters, categories: store.categories)
+                }
+                .sheet(item: $payeeSelection) { selection in
+                    PayeeHistoryView(payeeName: selection.name)
                 }
                 .sheet(item: $selectedTransaction) { transaction in
                     TransactionDetailView(
@@ -199,12 +210,18 @@ struct LedgerListView: View {
         } else {
             List {
                 ForEach(store.transactions) { transaction in
-                    Button {
-                        selectedTransaction = transaction
-                    } label: {
-                        TransactionRowView(transaction: transaction)
-                    }
-                    .buttonStyle(.plain)
+                    // BACKLOG.md L3 — the payee name is its own tappable target (opens the payee
+                    // history panel), so the row can no longer be one big Button (a Button inside
+                    // a Button's label doesn't get its own tap target). `.onTapGesture` on the row
+                    // container handles "open detail" for everywhere else in the row instead.
+                    TransactionRowView(
+                        transaction: transaction,
+                        onPayeeTapped: {
+                            payeeSelection = PayeeSelection(name: transaction.payee.name)
+                        }
+                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture { selectedTransaction = transaction }
                     // BACKLOG.md J5 — quick triage without opening the sheet. Dismiss is listed
                     // first so it sits at the swipe edge (the full-swipe action), matching the
                     // "quick triage is quick" story; Edit sits next to it, opening J3's sheet.

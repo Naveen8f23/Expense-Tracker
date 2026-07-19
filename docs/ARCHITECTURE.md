@@ -233,23 +233,33 @@ Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
   source email" would otherwise be.
 - **Mobile Client — Ledger (iOS)** — a second Presentation-layer client, alongside the Web
   Dashboard, talking to the same API Layer only (REQUIREMENTS.md §15, ADR-0023). **M7 in progress
-  (2026-07-19): Epics I, J (J1-J7), and K (needs-review queue, K1-K4) all done.**
-  Native Swift + SwiftUI, project defined via a checked-in XcodeGen `project.yml` rather than a
-  hand-edited `.xcodeproj` (`ios/Ledger/`). Module shape mirrors the frontend's own discipline — a
-  single `Networking/APIClient.swift` wraps every backend call (no view talks to `URLSession`
-  directly, the same rule `frontend/src/api/client.ts` follows), `ViewState/` holds
+  (2026-07-19): Epics I, J (J1-J7), K (needs-review queue, K1-K4), and L (analytics, L1-L3) all
+  done.** Native Swift + SwiftUI, project defined via a checked-in XcodeGen `project.yml` rather
+  than a hand-edited `.xcodeproj` (`ios/Ledger/`). Module shape mirrors the frontend's own
+  discipline — a single `Networking/APIClient.swift` wraps every backend call (no view talks to
+  `URLSession` directly, the same rule `frontend/src/api/client.ts` follows), `ViewState/` holds
   `ObservableObject` stores (the only layer allowed to call `Networking`), `Views/` holds SwiftUI
   screens. Built so far: the 3-tab shell (Ledger/Analytics/Review), the connection-settings screen
   (I3), the transaction list with full filtering/search/chips (J1-J2), a transaction detail sheet
   for correcting fields or dismissing a transaction (J3), the source email viewer (J4), swipe
   actions for quick edit/dismiss (J5), a "Manage categories" screen plus inline "+ New category…"
-  in J3's picker (J6), a nav-bar sync-health dot (J7), and the Review tab (K1-K4) — both halves of
+  in J3's picker (J6), a nav-bar sync-health dot (J7), the Review tab (K1-K4) — both halves of
   `GET /needs-review` as separate sections with reason chips, swipe-to-ignore for unmatched emails,
   low-confidence transactions reusing J3's own detail sheet rather than a separate form, and a tab
   badge (`RootTabView` owns the shared `NeedsReviewStore` so the badge is visible outside
-  `ReviewView` itself) refetched on launch/tab-switch/foreground only — no polling. New-transaction
-  notifications will be local (`UNNotificationRequest`), driven by the same `GET /transactions/recent`
-  polling pattern as the web dashboard's `useNewTransactionNotifications` hook — no APNs, no
+  `ReviewView` itself) refetched on launch/tab-switch/foreground only — no polling; and the
+  Analytics tab (L1-L3) — a monthly summary with a Previous/Next switcher, a category breakdown
+  sharing the same month cursor (ADR-0021), and a payee history panel reached by tapping a payee
+  name anywhere it appears (`TransactionRowView`'s `onPayeeTapped`, a `PayeeSelection` value
+  driving `.sheet(item:)`). **Two real SwiftUI bugs found and fixed via live verification during
+  L1/L3 — both variations on "state that must stay internally consistent, read at two different
+  times":** a `.task` attached to a `List`'s conditional content restarted unpredictably (fixed by
+  moving the month switcher outside the `List` and making it the one, explicit trigger via
+  `.task(id:)`); and a `Bool` + `String` pair driving a sheet let the content closure read a stale
+  default (fixed by replacing both with one `Identifiable` optional, the same shape
+  `selectedTransaction` already used reliably). New-transaction notifications will be local
+  (`UNNotificationRequest`), driven by the same `GET /transactions/recent` polling pattern as the
+  web dashboard's `useNewTransactionNotifications` hook — no APNs, no
   third-party push relay (ADR-0024) — once Epic M is reached. Detailed stories in
   [BACKLOG.md](BACKLOG.md) Epics I–M.
 

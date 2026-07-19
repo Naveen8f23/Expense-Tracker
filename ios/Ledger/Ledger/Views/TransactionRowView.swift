@@ -8,13 +8,28 @@ import SwiftUI
 // that parity; fixed once noticed. Tappable — opens J3's detail sheet — hence the chevron.
 struct TransactionRowView: View {
     let transaction: Transaction
+    /// BACKLOG.md L3 — when set, the payee name becomes its own tappable target (opening
+    /// `PayeeHistoryView`), separate from tapping the rest of the row (which opens J3's detail
+    /// sheet). `nil` by default so existing call sites (previews, `PayeeHistoryView`'s own
+    /// transaction list) keep plain, non-interactive payee text.
+    var onPayeeTapped: (() -> Void)? = nil
 
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(transaction.payee.name)
-                        .font(.body)
+                    if let onPayeeTapped {
+                        Button(action: onPayeeTapped) {
+                            Text(transaction.payee.name)
+                                .font(.body)
+                                .foregroundStyle(.primary)
+                                .underline()
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Text(transaction.payee.name)
+                            .font(.body)
+                    }
                     if transaction.emailMessageId == nil {
                         Text("Manual")
                             .font(.caption2)

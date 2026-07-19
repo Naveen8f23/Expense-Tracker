@@ -1469,36 +1469,97 @@ showed a badge of "1" on launch, matching the one real unmatched email in the qu
 
 ## Epic L — Ledger: Analytics (mirrors G2–G4)
 
-**Status: Not started.**
+**Status: Done (2026-07-19).** All three stories complete — 76/76 iOS unit tests passing (9 new).
+Two real bugs were found and fixed via live verification, both the same underlying lesson as
+J6's: don't let two pieces of state (or two independent triggers) that must stay in sync drift
+apart. See L1 and L3 below for what each one actually was.
 
-### L1. Analytics tab — monthly summary
+### L1. Analytics tab — monthly summary ✅
 **As** the owner-operator, **I want** the monthly total on my phone, **so that** I can see my
 spending at a glance without opening a laptop (ANL-1, ANL-4).
 
 **Acceptance criteria:**
 - Calls `GET /analytics/monthly`; month switcher (Previous/Next) plus spent/received/net summary
-  cards, matching the confirmed design and ADR-0021's sign convention.
+  cards, matching the confirmed design and ADR-0021's sign convention. ✅ New
+  `ViewState/AnalyticsStore.swift` + `Views/AnalyticsView.swift`. `month` (`"yyyy-MM"`) is tracked
+  client-side (`DateFormatter` pinned to `en_US_POSIX` — a plain, unpinned formatter can silently
+  mis-parse a fixed-format string depending on device locale/calendar) and driven entirely by
+  `.task(id: store.month)`, the single trigger for loading.
+
+**Real bug found and fixed via live verification:** the month switcher's label and figures stayed
+completely frozen after tapping Previous/Next, even though `AnalyticsStore.month` genuinely
+changed (confirmed via direct instrumentation — same object instance, same thread, correct new
+value). Two compounding causes, found by process of elimination:
+1. `goToPreviousMonth`/`goToNextMonth` were originally `async` functions that changed `month` *and
+   also* called `load()` themselves, racing against `.task`'s own (undocumented but real) habit of
+   restarting whenever the `List` content it's attached to gets diffed for unrelated reasons. Fixed
+   by making the month-shift functions pure and synchronous, and making `.task(id: store.month)`
+   the *only* trigger for loading — one trigger, no race.
+2. Even after that fix, the label still didn't update: the month switcher lived inside a `List`
+   `Section`, and a `Section`'s direct (non-`ForEach`) content didn't reliably re-render on
+   `@Published` changes from a sibling code path. Fixed by moving the month switcher entirely
+   outside the `List` into a plain `VStack` above it — the same List/VStack split
+   `LedgerListView` already uses successfully for its own filter controls.
+
+**Verified:** 5 new unit tests (`LedgerTests/AnalyticsStoreTests.swift`) covering no-connection,
+populate, server-error, and both month-shift directions (including a year rollover). **Also
+verified live** against the real local backend: tapping Previous/Next now genuinely moves the
+label and re-fetches real data for the new month (confirmed a real, populated July 2026 vs. an
+empty June 2026).
 
 **Depends on:** I2. **Size:** M.
 
-### L2. Category breakdown
+### L2. Category breakdown ✅
 **As** the owner-operator, **I want** to see spend by category for the selected month, **so
 that** I understand where money goes, from my phone (ANL-2).
 
 **Acceptance criteria:**
 - Calls `GET /analytics/by-category`; ranked bars, debit-only, "Uncategorized" bucket included —
-  same conventions as the web dashboard (ADR-0021), no reinterpretation on the client.
+  same conventions as the web dashboard (ADR-0021), no reinterpretation on the client. ✅ Shares
+  `AnalyticsStore`/`AnalyticsView` with L1 (same month cursor, ADR-0021); renders as a plain ranked
+  list below the summary cards, reusing whatever order/bucketing the backend already returns.
+
+**Verified:** covered by the same `AnalyticsStoreTests` as L1 (populate test asserts both halves
+decode correctly together) plus the same live verification — real category breakdown rendered
+correctly for July 2026 and correctly emptied for June 2026.
 
 **Depends on:** L1. **Size:** S.
 
-### L3. Payee history
+### L3. Payee history ✅
 **As** the owner-operator, **I want** to tap any payee name and see their running history and
 total, **so that** I can spot patterns per merchant/person (ANL-3).
 
 **Acceptance criteria:**
 - Tapping a payee name anywhere it appears (list rows, review queue) calls
   `GET /analytics/by-payee/{payee}` and opens a panel with the total and a clickable transaction
-  list, matching the confirmed design's payee history view.
+  list, matching the confirmed design's payee history view. ✅ New
+  `ViewState/PayeeHistoryStore.swift` + `Views/PayeeHistoryView.swift` + shared `PayeeSelection`
+  (an `Identifiable` wrapper). `TransactionRowView` gained an optional `onPayeeTapped` closure —
+  when set, the payee name renders as its own `Button`, separate from the rest of the row (which
+  opens the transaction detail sheet via `.onTapGesture` on the row container, since a `Button`
+  can no longer wrap the whole row once another `Button` needs to live inside it). Wired into both
+  `LedgerListView`'s rows and `ReviewView`'s low-confidence rows.
+
+**Real bug found and fixed via live verification:** tapping a payee correctly opened the payee
+history panel, but it always 404'd — even for a payee confirmed (via direct `curl`) to have real
+data. Traced with file-based instrumentation (print/console output doesn't reliably surface from
+the app process through `xcodebuild test`) to the actual value reaching the network call: an
+**empty string**, not the tapped payee's name. Root cause: the panel was driven by two separate
+`@State` variables — `showingPayeeHistory: Bool` and `payeeNameForHistory: String` — set together
+in one closure, then read separately by `.sheet(isPresented:)` and its content closure. This is
+the identical shape of bug J6 already found once (an alert's dismiss-vs-data race) — two pieces of
+state that must stay consistent, read at different times. Fixed by replacing both with one
+`PayeeSelection?` value driving `.sheet(item:)`, mirroring the already-reliable
+`selectedTransaction: Transaction?` pattern used everywhere else in this codebase. **General
+lesson, worth remembering for any future sheet/alert:** a single `Identifiable` optional is not
+just tidier than a `Bool` + a data variable — it's the only shape that can't go internally
+inconsistent with itself.
+
+**Verified:** 4 new unit tests (`LedgerTests/PayeeHistoryStoreTests.swift`) covering no-connection,
+populate + pagination + categories-fetched-once, load-more, and a server-error path. **Also
+verified live** against the real local backend: tapping a real "NAVEEN V" transaction's payee name
+correctly opened its history panel showing the real total and transaction count from a direct
+`curl` cross-check.
 
 **Depends on:** L1, J1. **Size:** S.
 
