@@ -6,6 +6,7 @@ import {
   type TransactionFilters,
   type TransactionType,
 } from "../api/client";
+import AddTransactionPanel from "./AddTransactionPanel";
 import PayeeHistoryPanel from "./PayeeHistoryPanel";
 import TransactionDetailPanel from "./TransactionDetailPanel";
 import { TransactionDateTime } from "../utils/transactionTime";
@@ -58,6 +59,7 @@ export default function TransactionsView({
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [selectedPayee, setSelectedPayee] = useState<string | null>(null);
+  const [addingTransaction, setAddingTransaction] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
@@ -121,7 +123,12 @@ export default function TransactionsView({
 
   return (
     <div className="view">
-      <h2>Transactions</h2>
+      <div className="view-header">
+        <h2>Transactions</h2>
+        <button type="button" onClick={() => setAddingTransaction(true)}>
+          + Add transaction
+        </button>
+      </div>
 
       <div className="filter-bar">
         <input
@@ -232,6 +239,11 @@ export default function TransactionsView({
                     >
                       {txn.payee.name}
                     </button>
+                    {txn.email_message_id === null && (
+                      <span className="badge-manual" title="Manually added — no source email">
+                        Manual
+                      </span>
+                    )}
                   </td>
                   <td>{txn.category_name ?? "—"}</td>
                   <td>{txn.payment_method === "upi" ? "UPI" : "Credit Card"}</td>
@@ -283,6 +295,15 @@ export default function TransactionsView({
           onOpenTransaction={(transactionId) => {
             setSelectedPayee(null);
             setSelectedId(transactionId);
+          }}
+        />
+      )}
+
+      {addingTransaction && (
+        <AddTransactionPanel
+          onClose={() => setAddingTransaction(false)}
+          onCreated={() => {
+            refresh();
           }}
         />
       )}

@@ -165,7 +165,11 @@ class Transaction(Base):
     reference_number: Mapped[Optional[str]]  # nullable: credit card debit template lacks one
     confidence_score: Mapped[float] = mapped_column(default=1.0)
     review_status: Mapped[ReviewStatus] = mapped_column(Enum(ReviewStatus))
-    email_message_id: Mapped[int] = mapped_column(ForeignKey("email_messages.id"), unique=True)
+    # Nullable (H2, COR-5): a manually-added transaction has no source email at all. NULL here
+    # *is* the "this was added manually" marker -- no separate boolean column needed.
+    email_message_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("email_messages.id"), unique=True
+    )
     dismissed: Mapped[bool] = mapped_column(default=False)  # COR-4: "not a real expense"
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
@@ -173,7 +177,7 @@ class Transaction(Base):
     payee: Mapped[Payee] = relationship()
     category: Mapped[Optional[Category]] = relationship()
     correction_log: Mapped[list["CorrectionLog"]] = relationship(back_populates="transaction")
-    email_message: Mapped[EmailMessage] = relationship(back_populates="transaction")
+    email_message: Mapped[Optional[EmailMessage]] = relationship(back_populates="transaction")
 
 
 class CorrectionLog(Base):

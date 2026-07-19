@@ -16,7 +16,9 @@ def serialize_transaction(txn: Transaction) -> dict:
         # Not every template provides a time (the UPI templates are date-only, REQUIREMENTS.md
         # Appendix A) -- the email's received time is exposed separately so the dashboard can
         # show a clearly-marked approximate time for those rows rather than fabricating one.
-        "email_received_at": txn.email_message.received_at.isoformat(),
+        # Null for a manually-added transaction (H2, COR-5), which has no source email at all --
+        # the dashboard falls back to `created_at` in that case.
+        "email_received_at": txn.email_message.received_at.isoformat() if txn.email_message else None,
         "payee": {"id": txn.payee.id, "name": txn.payee.name, "identifier": txn.payee.identifier},
         "instrument_last4": txn.instrument_last4,
         "category_id": txn.category_id,

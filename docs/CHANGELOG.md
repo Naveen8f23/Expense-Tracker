@@ -9,6 +9,36 @@ versioned releases begin.
 ## [Unreleased]
 
 ### Added (code)
+- **Epic H (Cross-cutting polish) complete (2026-07-19)** — the two remaining stories:
+  - **H1 (encryption verification):** already satisfied, no new code — credited to
+    `backend/tests/test_schema.py::test_sensitive_fields_are_encrypted_at_rest`, built during
+    Epic A2 (2026-07-18), which already opens the raw SQLite file directly and confirms
+    `gmail_connections.tokens`/`email_messages.content` aren't human-readable while a plain
+    column is. Just never cross-referenced in BACKLOG.md's Epic H section until now.
+  - **H2 (manual "add a transaction" escape hatch, COR-5):** `transactions.email_message_id` is
+    now a nullable FK (migration `8bcc9bb76003`) — `NULL` is the "manually added" marker, not a
+    separate flag (ADR-0022). New `app/application/add_manual_transaction.py`
+    (`add_manual_transaction`) + `POST /transactions`; payee matched case-insensitively by name
+    (no VPA to key on for a typed-in name), COR-2's remembered-category behavior applies the same
+    way it does for corrections and auto-ingestion. `frontend/src/components/
+    AddTransactionPanel.tsx` — a new "+ Add transaction" button in `TransactionsView`, a
+    persistent "Manually added — no source email" banner framing it as the exception (not the
+    norm). Rows with no source email get a "Manual" badge in the table;
+    `TransactionDetailPanel` substitutes a note for its "View source email" button on these rows
+    rather than showing a broken toggle. `app/domain/transaction_time.py`'s
+    `effective_sort_datetime` gained a third fallback tier (`created_at`) for transactions that
+    have neither a real `txn_time` nor a source email to borrow a time from.
+  - `serialize_transaction`/`GET /transactions/{id}` updated to handle a null `email_message`
+    (`email_received_at`/`source_email` become `None`) — the one place Epic G's time-display
+    follow-up had assumed every transaction has a source email.
+  - Tests: `TestAddManualTransaction` (3 tests) + a new `effective_sort_datetime` fallback-tier
+    unit test. 148/148 backend tests passing (4 new) on macOS and the Ubuntu VM
+    (`scripts/vm_test.py`). Verified live: added two manual transactions via the running
+    dashboard for the same payee in different casing — confirmed the badge, the detail panel's
+    note, correct time-based sort position, and that the category assigned on the first entry was
+    automatically applied to the second (COR-2) without being asked again.
+
+### Added (code)
 - **Epic G (Search & Analytics) complete (2026-07-19)** — all four stories (G1–G4), closing out
   REQUIREMENTS.md §13's MVP definition (modulo the still-pending 4th email template):
   - **G2 (monthly summary):** `app/application/analytics.py` (`get_monthly_summary`) +

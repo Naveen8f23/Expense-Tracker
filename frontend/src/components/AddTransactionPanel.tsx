@@ -1,35 +1,39 @@
 import { useEffect, useState } from "react";
 import {
-  correctTransaction,
   createCategory,
-  dismissTransaction,
-  getTransaction,
+  createManualTransaction,
   listCategories,
   type Category,
   type PaymentMethod,
-  type TransactionCorrection,
   type TransactionType,
-  type TransactionWithSourceEmail,
 } from "../api/client";
 
 const NEW_CATEGORY_VALUE = "__new__";
 
-interface Props {
-  transactionId: number;
-  onClose: () => void;
-  onChanged: () => void;
+function today(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
+    now.getDate(),
+  ).padStart(2, "0")}`;
 }
 
-export default function TransactionDetailPanel({ transactionId, onClose, onChanged }: Props) {
-  const [txn, setTxn] = useState<TransactionWithSourceEmail | null>(null);
+interface Props {
+  onClose: () => void;
+  onCreated: () => void;
+}
+
+// H2, COR-5: an escape hatch for the rare transaction with no corresponding email (e.g. cash) --
+// a separate create-only panel rather than retrofitting TransactionDetailPanel (which is
+// fetch-and-edit shaped around an existing transaction id). Reuses the same panel/field markup
+// and inline "+ New category…" pattern for a consistent look.
+export default function AddTransactionPanel({ onClose, onCreated }: Props) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [showEmail, setShowEmail] = useState(false);
 
   const [amount, setAmount] = useState("");
-  const [txnDate, setTxnDate] = useState("");
+  const [txnDate, setTxnDate] = useState(today());
   const [payeeName, setPayeeName] = useState("");
   const [categorySelection, setCategorySelection] = useState<string>("");
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -39,25 +43,20 @@ export default function TransactionDetailPanel({ transactionId, onClose, onChang
   useEffect(() => {
     setLoading(true);
     setError(null);
-    Promise.all([getTransaction(transactionId), listCategories()])
-      .then(([fetchedTxn, categoryResponse]) => {
-        setTxn(fetchedTxn);
-        setCategories(categoryResponse.items);
-        setAmount(fetchedTxn.amount);
-        setTxnDate(fetchedTxn.txn_date);
-        setPayeeName(fetchedTxn.payee.name);
-        setCategorySelection(fetchedTxn.category_id ? String(fetchedTxn.category_id) : "");
-        setPaymentMethod(fetchedTxn.payment_method);
-        setTxnType(fetchedTxn.txn_type);
-      })
+    listCategories()
+      .then((response) => setCategories(response.items))
       .catch((err) => setError(String(err)))
       .finally(() => setLoading(false));
-  }, [transactionId]);
+  }, []);
 
   async function handleSave() {
     setSaving(true);
     setError(null);
     try {
+      if (!amount || !payeeName.trim()) {
+        throw new Error("Amount and payee are required.");
+      }
+
       let categoryId: number | undefined;
       if (categorySelection === NEW_CATEGORY_VALUE) {
         if (!newCategoryName.trim()) {
@@ -69,30 +68,15 @@ export default function TransactionDetailPanel({ transactionId, onClose, onChang
         categoryId = Number(categorySelection);
       }
 
-      const correction: TransactionCorrection = {
+      await createManualTransaction({
         amount,
         txn_date: txnDate,
-        payee_name: payeeName,
+        payee_name: payeeName.trim(),
         payment_method: paymentMethod,
         txn_type: txnType,
         ...(categoryId !== undefined ? { category_id: categoryId } : {}),
-      };
-      await correctTransaction(transactionId, correction);
-      onChanged();
-      onClose();
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleDismiss() {
-    setSaving(true);
-    setError(null);
-    try {
-      await dismissTransaction(transactionId);
-      onChanged();
+      });
+      onCreated();
       onClose();
     } catch (err) {
       setError(String(err));
@@ -105,20 +89,30 @@ export default function TransactionDetailPanel({ transactionId, onClose, onChang
     <div className="panel-overlay" onClick={onClose}>
       <div className="panel" onClick={(e) => e.stopPropagation()}>
         <div className="panel-header">
-          <h3>Transaction #{transactionId}</h3>
+          <h3>Add transaction</h3>
           <button onClick={onClose} aria-label="Close">
             ×
           </button>
         </div>
 
-        {loading && <p>Loading…</p>}
-        {error && <p className="error">{error}</p>}
+        <p className="manual-banner">
+          Manually added — no source email. Use this only for the rare transaction with nothing
+          in your inbox (e.g. cash), not as a regular habit.
+        </p>
 
-        {txn && !loading && (
+        {error && <p className="error">{error}</p>}
+        {loading && <p>Loading…</p>}
+
+        {!loading && (
           <>
             <label>
               Amount
-              <input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+              <input
+                type="number"
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
             </label>
             <label>
               Date
@@ -126,11 +120,18 @@ export default function TransactionDetailPanel({ transactionId, onClose, onChang
             </label>
             <label>
               Payee
-              <input type="text" value={payeeName} onChange={(e) => setPayeeName(e.target.value)} />
+              <input
+                type="text"
+                value={payeeName}
+                onChange={(e) => setPayeeName(e.target.value)}
+              />
             </label>
             <label>
               Category
-              <select value={categorySelection} onChange={(e) => setCategorySelection(e.target.value)}>
+              <select
+                value={categorySelection}
+                onChange={(e) => setCategorySelection(e.target.value)}
+              >
                 <option value="">Uncategorized</option>
                 {categories.map((c) => (
                   <option key={c.id} value={c.id}>
@@ -166,39 +167,11 @@ export default function TransactionDetailPanel({ transactionId, onClose, onChang
               </select>
             </label>
 
-            <p className="metadata">
-              Reference: {txn.reference_number ?? "—"} · Instrument: {txn.instrument_last4 ?? "—"} ·
-              Confidence: {txn.confidence_score}
-            </p>
-
-            {txn.email_message_id === null && (
-              // H2, COR-5: a manually-added transaction has no source email at all -- this
-              // replaces the "View source email" toggle rather than silently omitting any
-              // indication of why it's missing.
-              <p className="manual-banner">Manually added — no source email.</p>
-            )}
-
             <div className="panel-actions">
               <button onClick={handleSave} disabled={saving}>
-                Save
+                Add transaction
               </button>
-              <button onClick={handleDismiss} disabled={saving} className="button-danger">
-                Not a real expense
-              </button>
-              {txn.email_message_id !== null && (
-                <button onClick={() => setShowEmail((v) => !v)} disabled={saving}>
-                  {showEmail ? "Hide source email" : "View source email"}
-                </button>
-              )}
             </div>
-
-            {showEmail && txn.source_email && (
-              // The cached email is untrusted external content (a real bank/UPI notification,
-              // per ADR-0006 with phishing-hardening explicitly deferred but not eliminated as a
-              // risk) -- rendered as plain escaped text, never via dangerouslySetInnerHTML, so a
-              // malicious email can never execute script in the dashboard's origin.
-              <pre className="source-email">{txn.source_email.content}</pre>
-            )}
           </>
         )}
       </div>

@@ -10,7 +10,9 @@ function formatTime12Hour(hours: number, minutes: number): string {
 // transaction time -- the UPI templates are date-only (REQUIREMENTS.md Appendix A) -- so those
 // rows fall back to the source email's received time instead, visually marked (a "~" prefix plus
 // a tooltip) since that's when the email arrived, not necessarily the bank's own transaction
-// time. Shared by TransactionsView and PayeeHistoryPanel so the two views can't drift apart.
+// time. A manually-added transaction (H2, COR-5) has no source email at all, so it falls one
+// tier further, to when the row was created. Shared by TransactionsView and PayeeHistoryPanel so
+// the two views can't drift apart.
 export function TransactionDateTime({ txn }: { txn: Transaction }) {
   if (txn.txn_time) {
     const [hours, minutes] = txn.txn_time.split(":").map(Number);
@@ -21,18 +23,20 @@ export function TransactionDateTime({ txn }: { txn: Transaction }) {
     );
   }
 
-  // email_received_at is stored/serialized as a naive UTC timestamp (no offset suffix) -- append
-  // "Z" so the browser parses it as UTC and converts to the viewer's local time, rather than
-  // silently misinterpreting it as already being in the browser's own timezone.
-  const received = new Date(`${txn.email_received_at}Z`);
-  const approxTime = formatTime12Hour(received.getHours(), received.getMinutes());
+  // Both email_received_at and created_at are stored/serialized as naive UTC timestamps (no
+  // offset suffix) -- append "Z" so the browser parses them as UTC and converts to the viewer's
+  // local time, rather than silently misinterpreting them as already being in the browser's own
+  // timezone.
+  const approxSourceIso = txn.email_received_at ?? txn.created_at;
+  const approx = new Date(`${approxSourceIso}Z`);
+  const approxTime = formatTime12Hour(approx.getHours(), approx.getMinutes());
+  const title = txn.email_received_at
+    ? "Approximate — based on when the source email arrived, not extracted from the transaction itself"
+    : "Approximate — based on when this manually-added transaction was recorded";
   return (
     <>
       {txn.txn_date}{" "}
-      <span
-        className="time-approx"
-        title="Approximate — based on when the source email arrived, not extracted from the transaction itself"
-      >
+      <span className="time-approx" title={title}>
         ~{approxTime}
       </span>
     </>

@@ -79,7 +79,12 @@ def list_transactions(
     # real performance problem is ever measured (Constitution principle 16).
     all_matching = stmt.options(joinedload(Transaction.email_message)).all()
     all_matching.sort(
-        key=lambda t: effective_sort_datetime(t.txn_date, t.txn_time, t.email_message.received_at),
+        key=lambda t: effective_sort_datetime(
+            t.txn_date,
+            t.txn_time,
+            t.email_message.received_at if t.email_message else None,
+            t.created_at,
+        ),
         reverse=True,
     )
     total = len(all_matching)

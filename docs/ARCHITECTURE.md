@@ -16,8 +16,11 @@ Analytics) done, verified, and confirmed by the owner (2026-07-19)** — a new A
 on the production VM per the epic-checkpoint policy (ADR-0014). Same-day follow-ups requested by
 the owner: transaction time now shown (real or approximated) everywhere a transaction is listed,
 and same-day sort order now actually follows that time
-(`app/domain/transaction_time.py`) instead of database insertion order. Detailed build backlog
-tracked in [BACKLOG.md](BACKLOG.md).
+(`app/domain/transaction_time.py`) instead of database insertion order. **Epic H (Cross-cutting
+polish) done (2026-07-19)** — H1 (encryption verification) was already satisfied by an Epic A2
+test; H2 (manual "add a transaction" escape hatch, ADR-0022) required making
+`transactions.email_message_id` nullable, the first schema change to that table's core shape
+since Epic A. Detailed build backlog tracked in [BACKLOG.md](BACKLOG.md).
 
 This document describes the current state of the system's architecture. It should always
 reflect what *is*, not what's planned (that belongs in [ROADMAP.md](ROADMAP.md)) or why a
@@ -171,7 +174,10 @@ Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
   payee.
 - **Correction** (`CorrectTransaction` use case) — COR-1 through COR-5. **Epic E complete:**
   `app/application/correct_transaction.py` (E3) and `app/application/dismiss_transaction.py`
-  (E4, COR-4). Manual "add a transaction with no email" (COR-5, H2) is not yet built.
+  (E4, COR-4). **H2 complete (2026-07-19):** `app/application/add_manual_transaction.py`
+  (`add_manual_transaction`) — COR-5's "add a transaction with no email" escape hatch. Payee
+  matched case-insensitively by name (no VPA to key on for a typed-in name, ADR-0022); COR-2's
+  remembered-category behavior applies the same way it does for corrections and auto-ingestion.
 - **Analytics** (`app/application/analytics.py`) — ANL-1 through ANL-4. **Epic G complete
   (2026-07-19):** `get_monthly_summary`, `get_category_breakdown`, `get_payee_history` — plain
   aggregation queries (`func.sum`/`group_by`) over `Transaction`, the first in this codebase.
@@ -213,6 +219,12 @@ Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
   polish: debounced free-text/payee inputs (a `searchDraft` state separate from the
   fetch-triggering `filters` state), a "Clear all filters" button, and removable active-filter
   chips.
+  **H2 addition (2026-07-19):** `frontend/src/components/AddTransactionPanel.tsx` — a
+  create-only panel (not a retrofit of the fetch-and-edit-shaped `TransactionDetailPanel`) opened
+  by a new "+ Add transaction" button in `TransactionsView`; a persistent banner frames it as the
+  exception, not the norm (COR-5). Rows with no source email (`email_message_id === null`) get a
+  "Manual" badge in the table and a substituted note in `TransactionDetailPanel` where "View
+  source email" would otherwise be.
 
 Each of these is swappable independently: e.g. the `GmailClient` could later be joined by a
 second bank's client without touching Extraction, Storage, or the Dashboard; the
@@ -251,7 +263,9 @@ Tables map directly to [REQUIREMENTS.md](REQUIREMENTS.md) §5 Data Model:
   (ING-8) — a dedicated API endpoint for reading this is Epic E's E7, not yet built.
 - `transactions` — amount, currency, date, time (nullable), payee, instrument last-4, category,
   payment method, type, reference number (nullable), confidence score, review status, link to
-  its `email_messages` row. Not encrypted at the column level (see above).
+  its `email_messages` row — **nullable since H2 (ADR-0022, migration `8bcc9bb76003`)**: a
+  manually-added transaction (COR-5) has no source email at all, and `NULL` here is the marker for
+  that, not a separate flag. Not encrypted at the column level (see above).
 - `payees` — payee/merchant identity as it appears in the source email, plus (added Epic E,
   migration `dcdef4f896b2`) `default_category_id`: the category last assigned to a transaction
   from this payee (COR-2), applied to that payee's *future* transactions by
@@ -366,10 +380,16 @@ considered and explicitly dropped (ADR-0009) — not an integration in this syst
 
 ## 8. Known Limitations / Technical Debt
 
-- Epics A-G (Foundation through Search & Analytics) built and verified (BACKLOG.md) — this
+- Epics A-H (Foundation through Cross-cutting polish) built and verified (BACKLOG.md) — this
   completes REQUIREMENTS.md §13's MVP definition, modulo the still-pending 4th email template
   (credit card credit, REQUIREMENTS.md §8). Automatic background sync (ADR-0019) and real VM
   production deployment (ADR-0020) added on top of F, same day.
+- **TRC-1 ("every transaction retains a reference back to the original email") has an explicit,
+  intentional exception: manually-added transactions (H2, COR-5, ADR-0022).**
+  `transactions.email_message_id` is nullable specifically for this case — `NULL` means "added
+  manually," not a data-quality gap. Any future reporting/auditing feature that assumes every
+  transaction has a source email should filter or branch on this rather than assuming TRC-1 holds
+  universally.
 - **Browser notifications only work while a dashboard tab is open** and the user has granted
   permission — there is no notification path for a closed tab or when no browser is running,
   since that would require Gmail's real push API and a public endpoint, explicitly not adopted

@@ -11,7 +11,10 @@ main (2026-07-19; PR #7) — this completes REQUIREMENTS.md §13's MVP definitio
 still-pending 4th email template). Two same-day follow-ups the owner requested during/after the
 demo are included in the same change: showing (real-or-approximate) transaction time next to the
 date everywhere, and fixing same-day sort order to actually follow that time instead of database
-insertion order.**
+insertion order. Epic H (Cross-cutting polish) is now also done, verified (148/148 backend tests
+passing), and demoed live (2026-07-19) — H1 (encryption verification) was already satisfied by an
+Epic A test; H2 (manual add-transaction escape hatch, ADR-0022) is new work, built and pending
+commit/merge.**
 
 This is the detailed, implementation-level breakdown of [ROADMAP.md](ROADMAP.md) milestones
 M2–M5, into units small enough to pick up and build one at a time. ROADMAP.md stays
@@ -862,7 +865,7 @@ history) are recorded as [DECISIONS.md](DECISIONS.md) ADR-0021.
 
 ## Epic H — Cross-cutting polish (rolling, alongside other epics)
 
-### H1. Sensitive-field encryption verification
+### H1. Sensitive-field encryption verification ✅
 **As** the owner-operator, **I want** confirmation that OAuth tokens and cached email content
 are genuinely unreadable in the raw database file, **so that** the NFR in REQUIREMENTS.md §4
 (as revised by ADR-0015) is actually true, not just assumed.
@@ -870,17 +873,42 @@ are genuinely unreadable in the raw database file, **so that** the NFR in REQUIR
 **Acceptance criteria:** an automated test opens the raw SQLite file directly (bypassing the
 application) and asserts `gmail_connections.tokens` and `email_messages.content` are not
 human-readable, while confirming this is understood as field-level, not whole-file, protection
-(ADR-0015) — not a one-time manual check.
+(ADR-0015) — not a one-time manual check. ✅ **Already satisfied, no new code needed (confirmed
+2026-07-19):** `backend/tests/test_schema.py::test_sensitive_fields_are_encrypted_at_rest`, built
+during Epic A2 (2026-07-18), already does exactly this — reads the raw SQLite file's bytes
+directly, asserts the OAuth token and email content aren't present as plaintext, confirms a plain
+column (a payee name) *is* found as plaintext (proving field-level, not whole-file, protection),
+and confirms the ORM transparently decrypts on read. This story was effectively done from Epic A
+onward; just never cross-referenced here.
 
 **Depends on:** A2. **Size:** S.
 
-### H2. Manual "add a transaction" escape hatch
+### H2. Manual "add a transaction" escape hatch ✅
 **As** the owner-operator, **I want** to add a transaction that has no corresponding email,
 **so that** the rare cash purchase isn't lost (COR-5).
 
 **Acceptance criteria:** a form (reusing F2's shape) with no source email required; clearly
 visually distinct from auto-ingested transactions so it stays the exception, not confused with
-the norm.
+the norm. ✅ `transactions.email_message_id` is now nullable (ADR-0022, migration `8bcc9bb76003`)
+— `NULL` *is* the "manually added" marker. `app/application/add_manual_transaction.py`
+(`add_manual_transaction`) + `POST /transactions`
+(`app/presentation/transactions_router.py`); payee matched case-insensitively by name (no VPA to
+key on), COR-2 default-category behavior mirrors `correct_transaction`/
+`run_classify_and_extract`. `frontend/src/components/AddTransactionPanel.tsx` — a new "+ Add
+transaction" button in `TransactionsView`, a persistent "Manually added — no source email" banner
+(not just a one-time confirmation), no time field (matches F2's shape). Visually distinct in the
+table via a "Manual" badge next to the payee name wherever `email_message_id` is null;
+`TransactionDetailPanel` replaces its "View source email" button with the same manual-entry note
+for these rows, rather than showing a broken/empty toggle.
+
+Tests: `backend/tests/test_transactions_routes.py::TestAddManualTransaction` (3 tests: no source
+email created, case-insensitive payee reuse, COR-2 default-category both ways) +
+`backend/tests/test_transaction_time.py` (new `created_at`-fallback tier). 148/148 backend tests
+passing (4 new) on macOS and the Ubuntu VM. Verified live: added two manual transactions via the
+running dashboard (Browser tool) for the same payee in different letter-casing — confirmed the
+"Manual" badge, the detail panel's no-source-email note, correct sort position via the
+`created_at` fallback, and that the second entry's category was auto-applied from the first
+(COR-2) without being asked again.
 
 **Depends on:** E3, F2. **Size:** S.
 
@@ -937,6 +965,16 @@ load — the first real new transaction afterward was silently absorbed into the
 baseline instead of triggering a refresh. Caught by inserting a transaction into an empty
 database and watching the dashboard fail to react; fixed with an explicit `hasBaseline` flag
 independent of what `lastSeenId` happens to be. See ARCHITECTURE.md §8 for the full note.
+
+---
+
+## Epic H — Status: Done (2026-07-19)
+
+All four stories (H1–H4) complete. H1 turned out to already be satisfied by an Epic A2 test (no
+new code); H3/H4 were built the same day as Epic F; H2 (this session) required a small,
+intentional schema change (`transactions.email_message_id` now nullable, ADR-0022) to represent
+"no source email" honestly rather than working around it. 148/148 backend tests passing (4 new)
+on macOS and the Ubuntu VM; dashboard verified live via the Browser tool.
 
 ---
 _Revision history: track major changes here in [CHANGELOG.md](CHANGELOG.md). Architectural

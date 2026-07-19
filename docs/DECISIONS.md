@@ -750,3 +750,52 @@ Copy this block for each new decision:
   gap. If a future story needs category breakdown over an arbitrary range (not just a calendar
   month), or needs to include refunds in the category total for a different purpose, that's a new
   decision to make then, not implied by this one.
+
+### ADR-0022: `transactions.email_message_id` becomes nullable, for manually-added transactions (H2)
+
+- **Date:** 2026-07-19
+- **Status:** Accepted
+- **Decision:**
+  1. `transactions.email_message_id` is now a nullable FK (migration `8bcc9bb76003`, SQLite batch
+     mode). `NULL` *is* the "this transaction was added manually, not extracted from an email"
+     marker — no separate boolean column (Constitution principle 26, one source of truth per
+     fact). Every place that previously assumed a transaction always has a source email
+     (`serialize_transaction`'s `email_received_at`, `GET /transactions/{id}`'s `source_email`,
+     the Epic G follow-up's `effective_sort_datetime`) now handles the null case explicitly.
+  2. A manually-added transaction's payee is matched by **case-insensitive exact name**, not a
+     VPA/merchant identifier (there isn't one to key on for a typed-in name) — reuses an existing
+     `Payee` row if one already matches (e.g. an auto-extracted "GOLKONDAS CAFE"), so payee
+     history (ANL-3, G4) doesn't fragment across a manual entry and an auto-extracted one for the
+     same real person/merchant.
+  3. COR-2 (remembered categories) applies identically to manual entries: assigning a category
+     while adding remembers it on the payee, exactly like `correct_transaction` already does; not
+     assigning one falls back to the payee's existing remembered default, exactly like
+     `run_classify_and_extract` already does for auto-ingested transactions.
+  4. The manual-add form has no time field (matches `TransactionDetailPanel`'s existing shape,
+     which also has none) — falls to a third tier in `effective_sort_datetime`: real `txn_time` →
+     source email's received time → (new) `created_at`, since a manual entry has neither of the
+     first two.
+- **Context:** BACKLOG.md H2 (COR-5) asks for an escape hatch to add a transaction with no
+  corresponding email (e.g. a cash purchase). Every other transaction in this system originates
+  from `run_classify_and_extract`, which always has a real `EmailMessage` to point to — the schema
+  had never needed to represent "no source email" until now.
+- **Alternatives considered:**
+  - **A synthetic placeholder `EmailMessage` row** for every manual entry, to keep the FK
+    `NOT NULL` — rejected: this would be fabricating a fictional "source email" purely to satisfy
+    a constraint that doesn't semantically apply, the opposite of the honest, explicit modeling
+    Constitution principle 4 asks for. A `NULL` is the truthful representation of "there is no
+    source email," not a workaround.
+  - **A separate boolean `is_manual` column** alongside keeping `email_message_id` required (and
+    pointing nowhere meaningful) — rejected for the same reason as the synthetic-row option, plus
+    it would create two facts (the flag, and whatever the FK points to) that could drift out of
+    sync (Constitution principle 26).
+- **Reasoning:** SQLite requires batch-table-rebuild mode for altering column nullability (no
+  in-place `ALTER COLUMN`), already the established pattern in this codebase (migration
+  `dcdef4f896b2`) — no new technique introduced. Handling `None` explicitly at each of the small,
+  fixed number of call sites that touch `email_message` is more maintainable long-term than
+  keeping a constraint alive via fabricated data.
+- **Consequences:** `TRC-1` ("every transaction retains a reference back to the original email")
+  now has an explicit, intentional exception for manually-added transactions — REQUIREMENTS.md
+  COR-5 already anticipated this exception; this ADR is what actually implements it in the schema.
+  Any future code that reads `txn.email_message`/`email_message_id` must handle `None`, the same
+  way `serialize_transaction`/`effective_sort_datetime` do now.
