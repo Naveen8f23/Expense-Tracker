@@ -1119,9 +1119,11 @@ infrastructure work, not an I3 defect.
 
 ## Epic J — Ledger: Transaction List & Correction (mirrors F1–F3, F5)
 
-**Status: J1-J4 done (committed and merged to main via
-[PR #9](https://github.com/Naveen8f23/Expense-Tracker/pull/9), together with Epic I); J5-J7 not
-started.**
+**Status: Done (2026-07-19).** J1-J4 committed and merged to main via
+[PR #9](https://github.com/Naveen8f23/Expense-Tracker/pull/9), together with Epic I. J5-J7
+(this session) complete all seven stories — 52/52 iOS unit tests passing, each story additionally
+verified live via the demo XCUITest harness against the real local backend (the developer's Mac,
+per J1's infrastructure note — ADR-0026 is still unresolved).
 
 ### J1. Transaction list (Ledger tab) ✅
 **As** the owner-operator, **I want** my transaction history on my phone in the same
@@ -1269,40 +1271,111 @@ that** I can verify the extraction from my phone (TRC-2), mirroring F3.
 
 **Depends on:** J3. **Size:** S.
 
-### J5. Swipe actions (Edit / Dismiss)
+### J5. Swipe actions (Edit / Dismiss) ✅
 **As** the owner-operator, **I want** to act on a row without opening it, **so that** quick
 triage is quick, matching the confirmed design's swipe gesture.
 
 **Acceptance criteria:**
 - Native `swipeActions` on each list row: Edit opens J3's sheet; Dismiss calls
-  `POST /transactions/{id}/dismiss` directly.
+  `POST /transactions/{id}/dismiss` directly. ✅ `Views/LedgerListView.swift` — Dismiss (red,
+  destructive) is listed first so it sits at the trailing swipe edge (the full-swipe action,
+  matching "quick triage is quick"); Edit (blue) sits next to it, opening J3's existing sheet. New
+  `TransactionListStore.dismissTransaction(baseURL:id:)` calls the endpoint directly and removes
+  the row from the local list on success (E1 already excludes dismissed rows server-side, so
+  there's nothing to wait for a reload for); failures surface via a new `actionErrorMessage` +
+  alert, distinct from the list's own load-error state.
+
+**Verified:** 2 new unit tests (`LedgerTests/TransactionListStoreTests.swift`, 36/36 total passing)
+covering the success path (row removed, total decremented) and a server-error path (row kept,
+error surfaced). **Also verified live** via the demo XCUITest harness against the real local
+backend: swiping revealed both actions, Edit opened the detail sheet, and Dismiss removed the row
+immediately — confirmed via `curl` that the transaction's `dismissed` field flipped to `true`
+server-side.
 
 **Depends on:** J1, J3. **Size:** S.
 
-### J6. Category management + inline "+ New category"
+### J6. Category management + inline "+ New category" ✅
 **As** the owner-operator, **I want** to create and assign categories directly from a transaction,
 **so that** categorizing stays a single action (mirrors F5/E6).
+
+**Scope note (resolved via AskUserQuestion, 2026-07-19):** unlike the web dashboard (F5, which only
+ever built inline "+ New category" creation), this story's acceptance criteria call for genuine
+full CRUD — rename and delete-with-reassignment have no existing UI to mirror. The owner chose a
+dedicated **"Manage categories" screen reached from a new gear-adjacent toolbar icon** (the same
+one-tap-deeper pattern I3 established for Connection Settings) over deferring rename/delete to a
+later story.
 
 **Acceptance criteria:**
 - Full CRUD via `GET`/`POST`/`PATCH`/`DELETE /categories`, including the reassign-on-delete flow
   (a delete without `reassign_to` on an in-use category surfaces E6's 409 + affected count, not a
-  silent failure or an orphaned reference).
-- The category picker in J3 supports "+ New category…" inline, creating then assigning in one flow.
+  silent failure or an orphaned reference). ✅ New `ViewState/CategoryManagementStore.swift` +
+  `Views/CategoryManagementView.swift`: create (inline text field + Add), rename (swipe → alert
+  with a pre-filled text field), delete (swipe → either an immediate remove, or — if the backend
+  409s — a `pendingReassignment` state driving a `ReassignmentSheet` listing every other category
+  as a reassignment target; there is no "delete anyway" option, matching the backend's own
+  contract).
+- The category picker in J3 supports "+ New category…" inline, creating then assigning in one
+  flow. ✅ `TransactionDetailView` — a sentinel picker option reveals an alert text field; the
+  created category is appended to a local `newlyCreatedCategories` array and immediately selected,
+  so the picker shows it as the current value without a second trip through the menu (verified
+  live, see below).
+
+**Two real bugs found and fixed via live UI verification (not by reasoning about the code, per the
+project's Definition of Done):**
+1. **Rename silently no-op'd.** The rename alert's `isPresented` binding was derived from the same
+   optional (`categoryBeingRenamed != nil`) the Save action's async body read — tapping Save
+   dismisses the alert, which (via that binding) nil'd the category out *before* the `async`
+   `performRename()` task actually ran, so it read `nil` and returned early. Fixed by decoupling
+   presentation (`showingRenameAlert: Bool`) from data (`categoryBeingRenamed: Category?`) — the
+   same class of bug, and the same fix shape, applies to any SwiftUI alert/sheet whose dismissal
+   and its own button action both mutate the same piece of state.
+2. **The exact same race in the reassignment sheet.** Tapping a reassignment target called
+   `onReassign` (unawaited, inside a `Task`) then `dismiss()` immediately — dismissal cleared
+   `store.pendingReassignment` before the queued task read it. Fixed by awaiting the reassign call
+   before dismissing, so the store's state stays valid for the whole operation.
+
+**Also surfaced (real, now fixed):** dismissing "Manage Categories" only refreshed the category
+*dropdown* (`store.refreshCategories`), not the transaction list itself — a transaction moved by a
+reassign-and-delete kept showing its old (now-deleted) category name until the next manual
+refresh. Fixed by also calling `reload()` in the sheet's `onDismiss`.
+
+**Verified:** 9 new `CategoryManagementStoreTests` + 2 new `TransactionDetailStoreTests`
+(`createCategory`), 45/45 total passing. **Also verified live** via two demo XCUITest walkthroughs
+against the real local backend: create → rename → assign to a real transaction → delete-while-in-
+use → reassignment sheet → confirm → transaction correctly shows the new category, deleted
+category confirmed gone on a fresh load (`testJ6CategoryManagement`); and the inline "+ New
+category…" flow creating and assigning a category in one trip without leaving J3's sheet
+(`testJ6InlineNewCategoryFromDetailPicker`).
 
 **Depends on:** J3. **Size:** S.
 
-### J7. Sync-health indicator
+### J7. Sync-health indicator ✅
 **As** the owner-operator, **I want** to see at a glance whether sync is healthy, **so that** I
 never wonder if Ledger (or the VM) is silently broken (ING-8), mirroring the confirmed design's
 nav-bar dot.
 
 **Acceptance criteria:**
 - A small colored dot (or equivalent) in the Ledger tab, calling `GET /sync/status`; tapping it
-  shows the same scanned/matched/skipped/failed counts the endpoint already returns.
+  shows the same scanned/matched/skipped/failed counts the endpoint already returns. ✅ New
+  `ViewState/SyncHealthStore.swift` (framework-agnostic — classifies `SyncStatus` into a plain
+  `Health` enum: `notConnected` / `pendingFirstSync` / `healthy` / `issues`, no SwiftUI import,
+  matching the other stores) + `Views/SyncHealthView.swift`. A small `Circle` toolbar button in
+  `LedgerListView` maps `Health` to a color (gray/yellow/green/red) and opens the detail sheet on
+  tap.
 - Pull-to-refresh re-fetches the current transaction list/state. **Explicitly out of scope:**
   there is no endpoint to trigger a new Gmail sync on demand — the VM's `SyncScheduler`
   (ADR-0019) already runs independently every 5 seconds regardless of whether Ledger is open, so
-  pull-to-refresh is for reassurance and immediacy, not for making the VM check Gmail sooner.
+  pull-to-refresh is for reassurance and immediacy, not for making the VM check Gmail sooner. ✅
+  `.refreshable` (already present from J1) and the initial `.task` both now also call
+  `syncHealthStore.load`; no new sync-trigger endpoint was added or is called.
+
+**Verified:** 7 new unit tests (`LedgerTests/SyncHealthStoreTests.swift`, 52/52 total passing)
+covering all five health classifications (no connection configured, no Gmail connected yet,
+connected-but-unsynced, healthy, issues via both a failed-count and a `last_error`) plus an
+unreachable-host path. **Also verified live** via the demo XCUITest harness against the real local
+backend: the dot rendered green (`"Sync status: healthy"`, matching the real `GET /sync/status`
+response), and tapping it showed the actual scanned/matched/skipped/failed counts and last-sync
+timestamp.
 
 **Depends on:** J1. **Size:** S.
 
@@ -1310,45 +1383,85 @@ nav-bar dot.
 
 ## Epic K — Ledger: Needs-Review Queue (mirrors F4)
 
-**Status: Not started.**
+**Status: Done (2026-07-19).** All four stories complete — 58/58 iOS unit tests passing (6 new).
+K1, K2, and K4 verified live against the real local backend; K3 verified by unit test and code
+review (it reuses J3's exact, already-live-verified sheet) since no low-confidence transaction
+happened to exist in the real queue this session to drive live.
 
-### K1. Review tab
+### K1. Review tab ✅
 **As** the owner-operator, **I want** a dedicated screen listing everything needing my attention,
 **so that** nothing gets missed from my phone (EXT-5, EXT-6).
 
 **Acceptance criteria:**
 - Calls `GET /needs-review`; displays both halves it already returns — unmatched emails and
   low-confidence transactions — as separate sections with reason chips, matching the confirmed
-  design.
+  design. ✅ New `ViewState/NeedsReviewStore.swift` + `Views/ReviewView.swift` (replacing I1's
+  placeholder). Unmatched emails show a reason chip — "Unrecognized" if `classifiedPatternId` is
+  nil, "Extraction failed" if it classified but couldn't extract (mirrors C7's two distinct
+  needs-review causes) — and are reachable via `NavigationLink` to J4's existing `SourceEmailView`
+  (read-only, same safe rendering). Low-confidence transactions show a "Low confidence" chip and
+  reuse `TransactionRowView`'s look.
+
+**Verified:** 6 new unit tests (`LedgerTests/NeedsReviewStoreTests.swift`, 58/58 total passing)
+covering no-connection, both-halves-populate + categories-fetched-once, a server-error path, and
+the ignore action's success/failure paths. **Also verified live** via the demo XCUITest harness
+against the real local backend: the one real unmatched email currently in the queue (a credit card
+bill payment via net banking — the known 5th HDFC shape from Epic C, correctly never classified)
+rendered with its "Unrecognized" chip, and tapping it opened the real cached source email.
 
 **Depends on:** I2. **Size:** M.
 
-### K2. Swipe-to-ignore for unmatched emails
+### K2. Swipe-to-ignore for unmatched emails ✅
 **As** the owner-operator, **I want** to clear an unmatched email from the queue, **so that** I'm
 not stuck reviewing something I've already decided isn't a real transaction (mirrors F4's addendum).
 
 **Acceptance criteria:**
-- Calls `POST /needs-review/emails/{id}/ignore` via a swipe action.
+- Calls `POST /needs-review/emails/{id}/ignore` via a swipe action. ✅
+  `NeedsReviewStore.ignoreEmail(baseURL:id:)`, wired to a destructive `swipeActions` button on each
+  unmatched-email row; removes the row locally on success (mirrors J5's dismiss pattern) rather
+  than waiting for a reload.
+
+**Verified:** live via the demo XCUITest harness against the real local backend — swiping the real
+unmatched email revealed "Ignore," tapping it removed the row immediately, and its
+`email_messages.status` was confirmed flipped to `IGNORED` via direct sqlite inspection. Reverted
+back to `NEEDS_REVIEW` afterward via the same route, since this was verification on the developer's
+own real inbox data, not an action the owner asked for.
 
 **Depends on:** K1. **Size:** S.
 
-### K3. Review a low-confidence transaction
+### K3. Review a low-confidence transaction ✅
 **As** the owner-operator, **I want** tapping a low-confidence item to open the same correction
 flow as any other transaction, **so that** there's only one correction UI to learn.
 
 **Acceptance criteria:**
-- Tapping a low-confidence item opens J3's detail sheet, not a separate review-specific form.
+- Tapping a low-confidence item opens J3's detail sheet, not a separate review-specific form. ✅
+  `ReviewView`'s low-confidence rows are wrapped in the exact same `.sheet(item:)` pattern
+  `LedgerListView` uses, presenting the unmodified `TransactionDetailView` — no separate
+  review-specific form exists.
+
+**Verified:** by code (the sheet presentation is identical to J1/J3's own, already live-verified)
+and by the fact that `NeedsReviewStore` supplies the same `categories`/`onChanged` shape J3 expects.
+**Not separately live-verified this session** — the real backend's queue had zero low-confidence
+transactions at the time (the AI-fallback path that produces them is rare by design, EXT-4/EXT-5),
+so there was nothing real to tap through. Revisit with a live drive-through once a real one exists.
 
 **Depends on:** K1, J3. **Size:** S.
 
-### K4. Review tab badge count
+### K4. Review tab badge count ✅
 **As** the owner-operator, **I want** the Review tab to wear its queue size openly, **so that** I
 always know before tapping in whether anything's waiting (matches the confirmed design).
 
 **Acceptance criteria:**
 - The tab badge reflects the queue size as of the last time it was fetched (app foreground/tab
   switch) — **not** a live/real-time count while another tab is open, since no push mechanism
-  exists to update it silently in the background (ADR-0024).
+  exists to update it silently in the background (ADR-0024). ✅ `NeedsReviewStore` is now owned by
+  `RootTabView` (lifted up from `ReviewView` so the tab item itself can read its count) and
+  refetched on launch (`.task`), on switching to the Review tab (`.onChange(of: selectedTab)`), and
+  on the app returning to the foreground (`.onChange(of: scenePhase)`) — no polling, no push.
+  `.badge(needsReviewStore.totalCount)` renders nothing when the count is 0.
+
+**Verified:** live via the demo XCUITest harness against the real local backend — the tab bar
+showed a badge of "1" on launch, matching the one real unmatched email in the queue at the time.
 
 **Depends on:** K1. **Size:** S.
 
@@ -1356,36 +1469,97 @@ always know before tapping in whether anything's waiting (matches the confirmed 
 
 ## Epic L — Ledger: Analytics (mirrors G2–G4)
 
-**Status: Not started.**
+**Status: Done (2026-07-19).** All three stories complete — 76/76 iOS unit tests passing (9 new).
+Two real bugs were found and fixed via live verification, both the same underlying lesson as
+J6's: don't let two pieces of state (or two independent triggers) that must stay in sync drift
+apart. See L1 and L3 below for what each one actually was.
 
-### L1. Analytics tab — monthly summary
+### L1. Analytics tab — monthly summary ✅
 **As** the owner-operator, **I want** the monthly total on my phone, **so that** I can see my
 spending at a glance without opening a laptop (ANL-1, ANL-4).
 
 **Acceptance criteria:**
 - Calls `GET /analytics/monthly`; month switcher (Previous/Next) plus spent/received/net summary
-  cards, matching the confirmed design and ADR-0021's sign convention.
+  cards, matching the confirmed design and ADR-0021's sign convention. ✅ New
+  `ViewState/AnalyticsStore.swift` + `Views/AnalyticsView.swift`. `month` (`"yyyy-MM"`) is tracked
+  client-side (`DateFormatter` pinned to `en_US_POSIX` — a plain, unpinned formatter can silently
+  mis-parse a fixed-format string depending on device locale/calendar) and driven entirely by
+  `.task(id: store.month)`, the single trigger for loading.
+
+**Real bug found and fixed via live verification:** the month switcher's label and figures stayed
+completely frozen after tapping Previous/Next, even though `AnalyticsStore.month` genuinely
+changed (confirmed via direct instrumentation — same object instance, same thread, correct new
+value). Two compounding causes, found by process of elimination:
+1. `goToPreviousMonth`/`goToNextMonth` were originally `async` functions that changed `month` *and
+   also* called `load()` themselves, racing against `.task`'s own (undocumented but real) habit of
+   restarting whenever the `List` content it's attached to gets diffed for unrelated reasons. Fixed
+   by making the month-shift functions pure and synchronous, and making `.task(id: store.month)`
+   the *only* trigger for loading — one trigger, no race.
+2. Even after that fix, the label still didn't update: the month switcher lived inside a `List`
+   `Section`, and a `Section`'s direct (non-`ForEach`) content didn't reliably re-render on
+   `@Published` changes from a sibling code path. Fixed by moving the month switcher entirely
+   outside the `List` into a plain `VStack` above it — the same List/VStack split
+   `LedgerListView` already uses successfully for its own filter controls.
+
+**Verified:** 5 new unit tests (`LedgerTests/AnalyticsStoreTests.swift`) covering no-connection,
+populate, server-error, and both month-shift directions (including a year rollover). **Also
+verified live** against the real local backend: tapping Previous/Next now genuinely moves the
+label and re-fetches real data for the new month (confirmed a real, populated July 2026 vs. an
+empty June 2026).
 
 **Depends on:** I2. **Size:** M.
 
-### L2. Category breakdown
+### L2. Category breakdown ✅
 **As** the owner-operator, **I want** to see spend by category for the selected month, **so
 that** I understand where money goes, from my phone (ANL-2).
 
 **Acceptance criteria:**
 - Calls `GET /analytics/by-category`; ranked bars, debit-only, "Uncategorized" bucket included —
-  same conventions as the web dashboard (ADR-0021), no reinterpretation on the client.
+  same conventions as the web dashboard (ADR-0021), no reinterpretation on the client. ✅ Shares
+  `AnalyticsStore`/`AnalyticsView` with L1 (same month cursor, ADR-0021); renders as a plain ranked
+  list below the summary cards, reusing whatever order/bucketing the backend already returns.
+
+**Verified:** covered by the same `AnalyticsStoreTests` as L1 (populate test asserts both halves
+decode correctly together) plus the same live verification — real category breakdown rendered
+correctly for July 2026 and correctly emptied for June 2026.
 
 **Depends on:** L1. **Size:** S.
 
-### L3. Payee history
+### L3. Payee history ✅
 **As** the owner-operator, **I want** to tap any payee name and see their running history and
 total, **so that** I can spot patterns per merchant/person (ANL-3).
 
 **Acceptance criteria:**
 - Tapping a payee name anywhere it appears (list rows, review queue) calls
   `GET /analytics/by-payee/{payee}` and opens a panel with the total and a clickable transaction
-  list, matching the confirmed design's payee history view.
+  list, matching the confirmed design's payee history view. ✅ New
+  `ViewState/PayeeHistoryStore.swift` + `Views/PayeeHistoryView.swift` + shared `PayeeSelection`
+  (an `Identifiable` wrapper). `TransactionRowView` gained an optional `onPayeeTapped` closure —
+  when set, the payee name renders as its own `Button`, separate from the rest of the row (which
+  opens the transaction detail sheet via `.onTapGesture` on the row container, since a `Button`
+  can no longer wrap the whole row once another `Button` needs to live inside it). Wired into both
+  `LedgerListView`'s rows and `ReviewView`'s low-confidence rows.
+
+**Real bug found and fixed via live verification:** tapping a payee correctly opened the payee
+history panel, but it always 404'd — even for a payee confirmed (via direct `curl`) to have real
+data. Traced with file-based instrumentation (print/console output doesn't reliably surface from
+the app process through `xcodebuild test`) to the actual value reaching the network call: an
+**empty string**, not the tapped payee's name. Root cause: the panel was driven by two separate
+`@State` variables — `showingPayeeHistory: Bool` and `payeeNameForHistory: String` — set together
+in one closure, then read separately by `.sheet(isPresented:)` and its content closure. This is
+the identical shape of bug J6 already found once (an alert's dismiss-vs-data race) — two pieces of
+state that must stay consistent, read at different times. Fixed by replacing both with one
+`PayeeSelection?` value driving `.sheet(item:)`, mirroring the already-reliable
+`selectedTransaction: Transaction?` pattern used everywhere else in this codebase. **General
+lesson, worth remembering for any future sheet/alert:** a single `Identifiable` optional is not
+just tidier than a `Bool` + a data variable — it's the only shape that can't go internally
+inconsistent with itself.
+
+**Verified:** 4 new unit tests (`LedgerTests/PayeeHistoryStoreTests.swift`) covering no-connection,
+populate + pagination + categories-fetched-once, load-more, and a server-error path. **Also
+verified live** against the real local backend: tapping a real "NAVEEN V" transaction's payee name
+correctly opened its history panel showing the real total and transaction count from a direct
+`curl` cross-check.
 
 **Depends on:** L1, J1. **Size:** S.
 
@@ -1393,21 +1567,53 @@ total, **so that** I can spot patterns per merchant/person (ANL-3).
 
 ## Epic M — Ledger: Manual Add & In-App Notifications
 
-**Status: Not started.**
+**Status: Done (2026-07-19).** All three stories complete — 76/76 iOS unit tests passing (10 new).
+This is the last epic in Ledger's backlog (BACKLOG.md Epics I–M) — M7 (ROADMAP.md) is now fully
+built.
 
-### M1. Add Transaction sheet
+**Post-completion polish (2026-07-19, not its own story — direct owner feedback while live-testing
+the finished build in the Simulator):** three rounds of fixes/enhancements, not tied to a
+REQUIREMENTS.md story since none of this was planned in advance:
+1. Debit amounts weren't red (only credits were colored, debits fell back to plain `.primary`) —
+   fixed in `TransactionRowView`.
+2. The Review tab's unmatched-email "Ignore" action was swipe-only and not discoverable enough,
+   and the source email viewer showed raw HTML tags verbatim — added a visible "Ignore" toolbar
+   button to `SourceEmailView` (alongside the existing swipe action) and a new
+   `Networking/ReadableEmailContent.swift` that strips tags/entities for display only (extraction
+   itself is untouched; still plain `Text`, no HTML rendering risk introduced).
+3. A full visual pass, then a follow-up to make it always dark — a new deterministic
+   `Networking/CategoryColor.swift` color-codes every category consistently (dot + row stripe +
+   Analytics proportional bar), a proper indigo `AccentColor` asset replaces default system blue,
+   and the whole app now forces dark mode regardless of the phone's system setting. See
+   [DECISIONS.md](DECISIONS.md) ADR-0027 for the full reasoning, alternatives considered, and a
+   real XcodeGen/`ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME` build-setting gotcha found along
+   the way. 84/84 iOS unit tests passing (8 new: `CategoryColorTests`, `ReadableEmailContentTests`).
+   Verified live via screenshots at every step, including pixel-sampling to confirm the accent
+   color fix actually took effect.
+
+### M1. Add Transaction sheet ✅
 **As** the owner-operator, **I want** to add a transaction with no corresponding email from my
 phone, **so that** the rare cash purchase isn't lost (COR-5, REQUIREMENTS.md MOB-6), mirroring H2.
 
 **Acceptance criteria:**
 - Reached only via a small "+" in the Ledger tab's toolbar — **never its own tab** — keeping it a
-  deliberate exception, not a primary workflow, matching the confirmed design's stated reasoning.
+  deliberate exception, not a primary workflow, matching the confirmed design's stated reasoning. ✅
+  New `ViewState/AddTransactionStore.swift` + `Views/AddTransactionView.swift` — a create-only
+  form (not a retrofit of the fetch-and-edit-shaped `TransactionDetailView`), reached via a new
+  "+" toolbar button in `LedgerListView`, with a persistent banner framing it as the exception.
 - Calls `POST /transactions`; category assigned manually via J6's picker, no auto-suggestion
-  (MOB-3); no time field, matching J3's own shape (H2's precedent).
+  (MOB-3); no time field, matching J3's own shape (H2's precedent). ✅ Reuses J6's exact "+ New
+  category…" inline-creation pattern (sentinel picker option + alert text field).
+
+**Verified:** 4 new unit tests (`LedgerTests/AddTransactionStoreTests.swift`) covering
+no-connection, a successful save (confirms the exact request body sent), a server-error path, and
+inline category creation. **Also verified live** against the real local backend: added "Corner
+Kirana Store" for ₹42, confirmed it appeared in the list with the "Manual" badge and
+`email_message_id: null` (the TRC-1 exception, matching H2/ADR-0022).
 
 **Depends on:** J3, J6. **Size:** S.
 
-### M2. In-app new-transaction notifications (ADR-0024)
+### M2. In-app new-transaction notifications (ADR-0024) ✅
 **As** the owner-operator, **I want** to be told when a new transaction arrives while I'm using
 Ledger, **so that** categorizing it feels almost as immediate as a push notification, within the
 scope actually agreed (REQUIREMENTS.md MOB-4).
@@ -1415,29 +1621,82 @@ scope actually agreed (REQUIREMENTS.md MOB-4).
 **Acceptance criteria:**
 - While the app is foregrounded, or backgrounded within the short window iOS keeps a recently-
   backgrounded app suspended-but-alive, poll `GET /transactions/recent?since_id=` on the same
-  ~5-second cadence as the web dashboard's H4 hook.
+  ~5-second cadence as the web dashboard's H4 hook. ✅ New
+  `ViewState/NewTransactionNotifier.swift`, owned by `RootTabView` (not any one tab, so it keeps
+  running regardless of which tab is showing) and started once on launch/whenever `scenePhase`
+  becomes `.active` (a no-op if already running — there is no explicit stop-on-background, since
+  iOS itself suspends the polling `Task` once the process actually suspends, which is exactly the
+  "short window" boundary this story describes).
 - A new transaction fires a local `UNNotificationRequest` (banner + badge); tapping it opens
   straight to that transaction's J3 detail sheet, via the notification's `userInfo` carrying the
-  transaction id — not just a generic app-open.
+  transaction id — not just a generic app-open. ✅ `userNotificationCenter(_:didReceive:)` extracts
+  the id into `deepLinkTransactionId`, observed by `RootTabView` via a `.sheet(item:)` bound to a
+  `PayeeSelection`-style single `Identifiable` wrapper (`DeepLinkTarget`) — the same
+  race-immune shape L3 already established, not a `Bool` + `Int` pair.
 - **Explicit non-goal, stated plainly and not to be silently "fixed" later without a fresh
   decision:** nothing arrives once Ledger has been fully backgrounded for more than a few minutes,
   or force-quit. This is ADR-0024's accepted scope, chosen after both a paid (APNs) and a free
-  third-party-relay path were presented and declined.
+  third-party-relay path were presented and declined. ✅ No change from ADR-0024 — this story only
+  builds the foreground/short-background path it already scoped.
+
+**Baseline tracking mirrors ADR-0019's own fix, proactively:** `hasBaseline` is an explicit flag,
+not inferred from `lastSeenId == nil` — the web dashboard's equivalent hook had exactly that bug
+(an empty-at-first-load history left the *next* real arrival silently absorbed into "already
+seen"). Both `lastSeenId` and `hasBaseline` are persisted in `UserDefaults` (not just in memory),
+since M3's background-task launch creates a fresh process with no connection to the foreground
+loop's state — without persisting where the previous run left off, every background check would
+re-treat the whole history as baseline and never actually notify anything.
+
+**Verified:** 5 unit tests (`LedgerTests/NewTransactionNotifierTests.swift`) covering baseline
+establishment, the ADR-0019-shaped edge case, baseline advancing to the highest id seen, the
+no-baseURL no-op, and cross-instance baseline persistence. **Also verified live** against the real
+local backend, with real difficulty getting a screenshot of the actual banner (see below) —
+resolved by tracing the pipeline directly instead: created a real transaction via `curl` from the
+host side while the app ran, and confirmed via temporary instrumentation that `poll()` correctly
+detected it (`"poll got 1 items"`) and `UNUserNotificationCenter` reported the request scheduled
+with no error (`"scheduled OK for txn 32"`) — proof the actual OS-level API call that produces the
+banner succeeded, independent of whether a screenshot could catch the (SpringBoard-drawn,
+auto-dismissing) banner in time. That instrumentation was temporary and has been removed; the demo
+XCUITest (`testM2NewTransactionNotification`) is a lighter smoke test confirming the app launches
+and handles the permission prompt cleanly, since `Process`/`NSTask` isn't available on iOS (so a
+UI test alone can't create a "new" transaction mid-run) and SpringBoard banners aren't reliably
+queryable from the app's own `XCUIApplication` session regardless.
 
 **Depends on:** J1, J3. **Size:** M.
 
-### M3. Background App Refresh supplement (best-effort)
+### M3. Background App Refresh supplement (best-effort) ✅
 **As** the owner-operator, **I want** Ledger to take advantage of whatever background time iOS
 is willing to grant it, **so that** the closed-app gap in M2 is at least partially, honestly
 narrowed rather than left completely dark.
 
 **Acceptance criteria:**
 - Registers a `BGAppRefreshTask`; when iOS grants it a run, checks `GET /transactions/recent`
-  once and fires a local notification if something new turned up.
+  once and fires a local notification if something new turned up. ✅ `App/LedgerApp.swift` —
+  registers the task identifier in `init()` (before the app finishes launching, as
+  `BGTaskScheduler` requires), submits a `BGAppRefreshTaskRequest` whenever `scenePhase` becomes
+  `.background`, and the launch handler reuses M2's exact `NewTransactionNotifier.poll(baseURL:)`
+  — no second, parallel "check for new transactions" implementation. New Info.plist keys
+  (`UIBackgroundModes: [fetch]`, `BGTaskSchedulerPermittedIdentifiers`) added via `project.yml`.
 - **Explicitly documented as best-effort, not reliable** — iOS decides if/when this runs (based on
   the owner's own usage patterns, battery state, etc.), often not more than a few times a day or
   less. Must never be presented to the owner as a dependable channel, in the UI or in any future
-  doc referencing it (Constitution principle 21).
+  doc referencing it (Constitution principle 21). ✅ No UI surfaces this mechanism at all — it's
+  pure background plumbing, so there's nothing to accidentally oversell.
+
+**Verification, honestly scoped:** confirmed the app builds and launches cleanly with the new
+registration code and Info.plist keys present in the built bundle (`plutil -p` on the built
+`Info.plist`), and that `handleAppRefresh` correctly reuses the same, already-tested `poll()` logic
+(via M2's `NewTransactionNotifierTests`, including the cross-process-persistence test written
+specifically for this story). **What could not be verified in this environment: an actual
+`BGAppRefreshTask` firing.** iOS Simulator does not grant these tasks real background time under
+normal conditions — the standard way to force one (Xcode's own attached-debugger LLDB console,
+`e -l objc -- (void)[[BGTaskScheduler sharedScheduler] _simulateLaunchForTaskWithIdentifier:...]`)
+requires an interactively-attached debugger session, which isn't available through this session's
+tooling. This is consistent with the story's own acceptance criteria — "best-effort, not
+reliable" — and is a real, honestly-flagged gap (mirrors this project's own established pattern of
+naming tooling limitations rather than silently overclaiming, e.g. ADR-0026, Epic F's VM tunnel
+gap). Revisit with a real device + attached Xcode debugger session if stronger confidence is ever
+needed.
 
 **Depends on:** M2. **Size:** S.
 

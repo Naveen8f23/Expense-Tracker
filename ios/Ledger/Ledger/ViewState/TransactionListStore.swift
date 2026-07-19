@@ -13,6 +13,7 @@ final class TransactionListStore: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var isLoadingMore = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var actionErrorMessage: String?
 
     var hasMore: Bool { transactions.count < total }
 
@@ -65,6 +66,42 @@ final class TransactionListStore: ObservableObject {
             total = response.total
         } catch {
             errorMessage = Self.describe(error)
+        }
+    }
+
+    /// BACKLOG.md J5 — swipe-to-dismiss, without opening J3's detail sheet. On success the row is
+    /// removed locally rather than waiting for a reload, since `GET /transactions` already
+    /// excludes dismissed rows by default (E1) — the local list would just come back without it
+    /// anyway on the next load.
+    @discardableResult
+    func dismissTransaction(baseURL: URL?, id: Int) async -> Bool {
+        guard let baseURL else { return false }
+        do {
+            _ = try await makeClient(baseURL).dismissTransaction(id: id)
+            transactions.removeAll { $0.id == id }
+            total = max(0, total - 1)
+            return true
+        } catch {
+            actionErrorMessage = Self.describe(error)
+            return false
+        }
+    }
+
+    func clearActionError() {
+        actionErrorMessage = nil
+    }
+
+    /// Re-fetches the category list — used after the J6 "Manage categories" screen or J3's inline
+    /// "+ New category" mutate categories elsewhere, since `load()` above only fetches them once
+    /// (`if categories.isEmpty`) and wouldn't otherwise notice a rename/create/delete.
+    func refreshCategories(baseURL: URL?) async {
+        guard let baseURL else { return }
+        do {
+            categories = try await makeClient(baseURL).listCategories().items
+        } catch {
+            // Best-effort — a stale category list until the next full reload is a minor
+            // inconvenience, not worth clobbering whatever `errorMessage`/`actionErrorMessage`
+            // is already showing for a more important failure.
         }
     }
 

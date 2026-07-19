@@ -8,6 +8,9 @@ struct TransactionDetailView: View {
     let transactionId: Int
     let categories: [Category]
     var onChanged: () -> Void = {}
+    /// BACKLOG.md J6 — called after creating a category inline via the picker below, so the
+    /// caller can refresh its own category list (this view only knows about the one it created).
+    var onCategoryCreated: () -> Void = {}
 
     @EnvironmentObject private var connectionSettings: ConnectionSettingsStore
     @StateObject private var store = TransactionDetailStore()
@@ -21,6 +24,18 @@ struct TransactionDetailView: View {
     @State private var txnType = "debit"
     @State private var showingDismissConfirm = false
     @State private var formPopulated = false
+    // "+ New category…" inline creation (mirrors web F5). `newlyCreatedCategories` holds
+    // categories created this session so the picker can show/select one immediately, without
+    // waiting for `categories` (a parent-owned prop) to refresh.
+    @State private var newlyCreatedCategories: [Category] = []
+    @State private var showingNewCategoryAlert = false
+    @State private var newCategoryName = ""
+    private static let newCategorySentinel = -1
+
+    private var pickerCategories: [Category] {
+        let existingIds = Set(categories.map(\.id))
+        return categories + newlyCreatedCategories.filter { !existingIds.contains($0.id) }
+    }
 
     var body: some View {
         NavigationStack {
@@ -51,6 +66,11 @@ struct TransactionDetailView: View {
                     populateFormIfNeeded()
                 }
                 .onChange(of: store.transaction) { _, _ in populateFormIfNeeded() }
+                .alert("New category", isPresented: $showingNewCategoryAlert) {
+                    TextField("Name", text: $newCategoryName)
+                    Button("Create") { Task { await createInlineCategory() } }
+                    Button("Cancel", role: .cancel) { newCategoryName = "" }
+                }
         }
     }
 
@@ -77,8 +97,15 @@ struct TransactionDetailView: View {
                     TextField("Payee", text: $payeeName)
                     Picker("Category", selection: $categoryId) {
                         Text("Uncategorized").tag(Int?.none)
-                        ForEach(categories) { category in
+                        ForEach(pickerCategories) { category in
                             Text(category.name).tag(Optional(category.id))
+                        }
+                        Text("+ New category…").tag(Optional(Self.newCategorySentinel))
+                    }
+                    .onChange(of: categoryId) { oldValue, newValue in
+                        if newValue == Self.newCategorySentinel {
+                            categoryId = oldValue
+                            showingNewCategoryAlert = true
                         }
                     }
                 }
@@ -173,6 +200,17 @@ struct TransactionDetailView: View {
         if await store.dismissTransaction(baseURL: connectionSettings.baseURL) {
             onChanged()
             dismiss()
+        }
+    }
+
+    private func createInlineCategory() async {
+        let name = newCategoryName.trimmingCharacters(in: .whitespaces)
+        newCategoryName = ""
+        guard !name.isEmpty else { return }
+        if let created = await store.createCategory(baseURL: connectionSettings.baseURL, name: name) {
+            newlyCreatedCategories.append(created)
+            categoryId = created.id
+            onCategoryCreated()
         }
     }
 }

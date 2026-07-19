@@ -8,6 +8,36 @@ versioned releases begin.
 
 ## [Unreleased]
 
+### Added (code)
+- **Ledger post-completion visual polish: category colors, dark theme, and two live-testing bug
+  fixes (2026-07-19).** Requested directly by the owner while live-testing the just-finished M7
+  build in the Simulator, in three rounds:
+  1. **Debit amounts weren't red** — `TransactionRowView` only colored credits green, debits fell
+     back to plain `.primary`; fixed to red, matching the web dashboard's own `.amount-debit`
+     convention.
+  2. **Review tab "Ignore" wasn't discoverable, and the source email viewer showed raw HTML** —
+     added a visible "Ignore" toolbar button to `SourceEmailView` (the swipe action alone wasn't
+     enough), and a new `Networking/ReadableEmailContent.swift` strips tags/entities for *display
+     only* (extraction is untouched; still plain `Text`, no HTML-rendering risk added).
+  3. **Full color pass, then always-dark (ADR-0027):** a new `Networking/CategoryColor.swift`
+     deterministically color-codes every category (dot + row stripe + an Analytics proportional
+     bar) from SwiftUI's built-in adaptive palette; a proper indigo `AccentColor` asset replaces
+     system blue everywhere; `LedgerApp.swift` now forces `.preferredColorScheme(.dark)` — Ledger
+     is always dark, not just dark-mode-capable, per the owner's explicit choice when presented
+     with the tradeoff (an AskUserQuestion: always-dark vs. keep following the system toggle, which
+     the app already did for free). A `LaunchBackground` asset (black) stops the launch screen
+     flashing white first.
+  - **Real build gotcha found along the way:** naming a colorset "AccentColor" in
+    `Assets.xcassets` isn't sufficient on its own — it compiled correctly (`assetutil` confirmed
+    the right RGB values) but system-tinted chrome (tab bar selection, nav buttons) kept rendering
+    plain system blue until `ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor` was added
+    to `project.yml`'s build settings — XcodeGen doesn't infer this from the folder name alone.
+    Confirmed fixed by pixel-sampling screenshots before/after.
+  - 84/84 iOS unit tests passing (8 new: `CategoryColorTests`, `ReadableEmailContentTests`).
+    Verified live at every step via Simulator screenshots (including pixel-sampling to prove the
+    accent-color fix actually took effect, not just "looked plausible"). See
+    [DECISIONS.md](DECISIONS.md) ADR-0027 and [BACKLOG.md](BACKLOG.md) Epic M's addendum.
+
 ### Added (planning, no code yet)
 - **Ledger (iOS app, ROADMAP.md M7) — visual design concept, then a five-epic backlog (2026-07-19).**
   A visual design concept (screen mockups, navigation model, endpoint mapping) was reviewed and
@@ -40,6 +70,66 @@ versioned releases begin.
   I3 updated to name this specific mechanism.
 
 ### Added (code)
+- **Epic M complete: M1-M3 (2026-07-19), closing out Ledger's entire backlog (ROADMAP.md M7 done).**
+  M1 adds a create-only "Add Transaction" sheet (`ViewState/AddTransactionStore.swift` +
+  `Views/AddTransactionView.swift`), reached via a new toolbar "+", reusing J6's inline
+  "+ New category…" pattern. M2 adds in-app new-transaction notifications
+  (`ViewState/NewTransactionNotifier.swift`, owned by `RootTabView`): polls
+  `GET /transactions/recent` every ~5s while foregrounded, fires a local `UNNotificationRequest`
+  per new transaction, and deep-links a tapped notification straight to that transaction's J3
+  detail sheet via a `PayeeSelection`-shaped `Identifiable` value (not a `Bool` + `Int` pair). M3
+  adds a best-effort `BGAppRefreshTask` supplement (`App/LedgerApp.swift`, new
+  `UIBackgroundModes`/`BGTaskSchedulerPermittedIdentifiers` Info.plist keys), reusing M2's exact
+  `poll()` logic rather than a second implementation. `lastSeenId`/`hasBaseline` are now persisted
+  in `UserDefaults` (not just in memory) so a `BGAppRefreshTask`'s fresh process can resume from
+  the same baseline the foreground loop left off at. 76/76 iOS unit tests passing (10 new). M1 and
+  M2's poll→schedule pipeline verified live against the real local backend (M2's actual banner
+  proved hard to screenshot in time — confirmed instead via temporary instrumentation that
+  scheduling itself succeeded with no OS error); M3's actual background firing could not be
+  verified in this environment (Simulator + no attached debugger) — an honestly-flagged gap, see
+  BACKLOG.md M3.
+- **Epic L complete: L1-L3 (2026-07-19), the Analytics tab.** New `ViewState/AnalyticsStore.swift`
+  + `Views/AnalyticsView.swift` (monthly summary + category breakdown, sharing one month cursor per
+  ADR-0021) and `ViewState/PayeeHistoryStore.swift` + `Views/PayeeHistoryView.swift` (payee history
+  panel, reached by tapping a payee name in a transaction row or the review queue — a new
+  `PayeeSelection` value drives `.sheet(item:)`). 76/76 iOS unit tests passing (9 new). **Two real
+  SwiftUI bugs found and fixed via live verification, both the same underlying shape:** (1) the
+  month switcher's label and figures stayed frozen after tapping Previous/Next, caused by a
+  `.task` restarting unpredictably when attached to a `List`'s conditional content, compounded by
+  an async month-shift function that *also* called `load()` itself, racing the `.task`; fixed by
+  making month-shifting a pure synchronous function and `.task(id: store.month)` the one trigger,
+  and by moving the month switcher outside the `List` entirely. (2) Tapping a payee always 404'd
+  even for payees confirmed to have real data — traced to `showingPayeeHistory: Bool` and
+  `payeeNameForHistory: String` being two separate `@State` vars set together but read separately
+  by a sheet and its content closure, letting the closure see the String's stale empty default;
+  fixed by replacing both with one `PayeeSelection?` driving `.sheet(item:)`, the same reliable
+  shape `selectedTransaction` already used. Four pre-existing demo UI tests (J4, J5, two J6 tests)
+  needed their payee-row selectors updated too, since the payee display is now its own `Button`
+  rather than plain text — an expected, correct consequence of L3, not a regression.
+- **Epic K complete: K1-K4 (2026-07-19), the needs-review queue.** New `Views/ReviewView.swift`
+  (replacing I1's placeholder) + `ViewState/NeedsReviewStore.swift` — lists both halves
+  `GET /needs-review` returns as separate sections with reason chips ("Unrecognized" /
+  "Extraction failed" for unmatched emails, "Low confidence" for transactions), swipe-to-ignore for
+  unmatched emails, and low-confidence transactions reusing J3's own detail sheet rather than a
+  separate review-specific form. The Review tab's badge count is now owned by `RootTabView` (not
+  `ReviewView` itself, so the tab item can read it) and refetched on launch, tab-switch, and
+  app-foreground only — no polling. 58/58 iOS unit tests passing (6 new). K1, K2, and K4 verified
+  live against the real local backend (one real unmatched email — a credit card bill payment via
+  net banking, the known 5th HDFC shape from Epic C — showed its "Unrecognized" chip, and
+  swipe-to-ignore correctly flipped its status server-side, reverted afterward since it was
+  verification, not a real user action); K3 verified by code/tests only, since no real
+  low-confidence transaction existed to drive through live this session.
+- **Epic J complete: J5-J7 (2026-07-19), closing out Epic J entirely.** J5 (swipe actions) adds
+  native `swipeActions` to each list row — Edit opens J3's sheet, Dismiss calls
+  `POST /transactions/{id}/dismiss` directly and removes the row locally. J6 (category management)
+  adds a new "Manage categories" screen (full CRUD, including the reassign-on-delete flow for a
+  category still in use) reached from a gear-adjacent toolbar icon, plus an inline "+ New
+  category…" option in J3's picker — two real SwiftUI alert/dismiss race bugs were found and fixed
+  via live verification (an alert's `isPresented` binding must not be derived from the same state
+  its own action reads, since dismissal and the action can run out of order). J7 (sync-health
+  indicator) adds a small colored nav-bar dot reflecting `GET /sync/status`, tappable for the full
+  scanned/matched/skipped/failed breakdown. 52/52 iOS unit tests passing (18 new); every story
+  additionally verified live via the demo XCUITest harness against the real local backend.
 - **Epic J: J4 (Source email viewer) complete (2026-07-19).** New
   `Views/SourceEmailView.swift`, reached via a "View source email" row in
   `TransactionDetailView` (shown only when `sourceEmail` is populated — manual entries keep J3's

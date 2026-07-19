@@ -11,8 +11,23 @@ struct LedgerListView: View {
     @State private var payeeText = ""
     @State private var showingSettings = false
     @State private var showingFilters = false
+    @State private var showingCategoryManagement = false
+    @StateObject private var categoryManagementStore = CategoryManagementStore()
+    @State private var showingSyncHealth = false
+    @StateObject private var syncHealthStore = SyncHealthStore()
     @State private var selectedTransaction: Transaction?
     @State private var debounceTask: Task<Void, Never>?
+    // BACKLOG.md L3 — separate from `selectedTransaction`: tapping a payee name opens the payee
+    // history panel instead of the transaction detail sheet. A single `Identifiable` optional
+    // (mirroring `selectedTransaction` itself), not two separate state vars — two vars (a Bool
+    // plus a String) briefly held the wrong data live: presenting a `.sheet(isPresented:)` whose
+    // content closure reads a *different* @State than the one driving `isPresented` raced against
+    // this view's own body re-evaluating for unrelated reasons, and the sheet ended up reading
+    // the String's stale default. One value can't be internally inconsistent with itself.
+    @State private var payeeSelection: PayeeSelection?
+    // BACKLOG.md M1 — reached only via this toolbar "+", never its own tab, per the confirmed
+    // design's explicit reasoning: kept a deliberate one-tap-deeper exception, not encouraged.
+    @State private var showingAddTransaction = false
 
     var body: some View {
         NavigationStack {
@@ -22,6 +37,20 @@ struct LedgerListView: View {
                 .onSubmit(of: .search) { Task { await reload() } }
                 .onChange(of: searchText) { _, _ in scheduleDebouncedReload() }
                 .toolbar {
+                    // BACKLOG.md J7 — a small colored dot mirroring the confirmed design's
+                    // nav-bar sync-health indicator. No on-demand "sync now" exists or is needed
+                    // (the SyncScheduler, ADR-0019, already runs independently every 5 seconds) —
+                    // this is purely a glance-and-tap status readout.
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            showingSyncHealth = true
+                        } label: {
+                            Circle()
+                                .fill(syncHealthColor)
+                                .frame(width: 10, height: 10)
+                        }
+                        .accessibilityLabel("Sync status: \(syncHealthAccessibilityLabel)")
+                    }
                     ToolbarItem(placement: .topBarLeading) {
                         Button {
                             showingFilters = true
@@ -29,6 +58,22 @@ struct LedgerListView: View {
                             Image(systemName: "line.3.horizontal.decrease.circle")
                         }
                         .accessibilityLabel("Filters")
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showingAddTransaction = true
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .accessibilityLabel("Add transaction")
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showingCategoryManagement = true
+                        } label: {
+                            Image(systemName: "tag")
+                        }
+                        .accessibilityLabel("Manage categories")
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
@@ -42,18 +87,79 @@ struct LedgerListView: View {
                 .sheet(isPresented: $showingSettings) {
                     ConnectionSettingsView(store: connectionSettings)
                 }
+                .sheet(isPresented: $showingSyncHealth) {
+                    SyncHealthView(store: syncHealthStore)
+                }
+                .sheet(
+                    isPresented: $showingCategoryManagement,
+                    // Refresh both the category dropdown *and* the transaction list on dismiss —
+                    // a rename, or a delete-with-reassignment, can change what category name a
+                    // currently-displayed transaction shows; refreshing categories alone would
+                    // leave those rows showing a stale (possibly now-deleted) category name.
+                    onDismiss: { Task { await store.refreshCategories(baseURL: connectionSettings.baseURL); await reload() } }
+                ) {
+                    CategoryManagementView(store: categoryManagementStore)
+                }
                 .sheet(isPresented: $showingFilters, onDismiss: { Task { await reload() } }) {
                     TransactionFilterSheet(filters: $filters, categories: store.categories)
+                }
+                .sheet(item: $payeeSelection) { selection in
+                    PayeeHistoryView(payeeName: selection.name)
+                }
+                .sheet(isPresented: $showingAddTransaction) {
+                    AddTransactionView(
+                        categories: store.categories,
+                        onCreated: { Task { await reload() } },
+                        onCategoryCreated: { Task { await store.refreshCategories(baseURL: connectionSettings.baseURL) } }
+                    )
                 }
                 .sheet(item: $selectedTransaction) { transaction in
                     TransactionDetailView(
                         transactionId: transaction.id,
                         categories: store.categories,
-                        onChanged: { Task { await reload() } }
+                        onChanged: { Task { await reload() } },
+                        onCategoryCreated: { Task { await store.refreshCategories(baseURL: connectionSettings.baseURL) } }
                     )
                 }
-                .task { await reload() }
-                .refreshable { await reload() }
+                .alert(
+                    "Couldn't dismiss transaction",
+                    isPresented: Binding(
+                        get: { store.actionErrorMessage != nil },
+                        set: { isPresented in if !isPresented { store.clearActionError() } }
+                    )
+                ) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text(store.actionErrorMessage ?? "")
+                }
+                .task {
+                    await reload()
+                    await syncHealthStore.load(baseURL: connectionSettings.baseURL)
+                }
+                .refreshable {
+                    await reload()
+                    await syncHealthStore.load(baseURL: connectionSettings.baseURL)
+                }
+        }
+    }
+
+    private var syncHealthColor: Color {
+        switch syncHealthStore.health {
+        case .unknown: return .gray
+        case .notConnected: return .gray
+        case .pendingFirstSync: return .yellow
+        case .healthy: return .green
+        case .issues: return .red
+        }
+    }
+
+    private var syncHealthAccessibilityLabel: String {
+        switch syncHealthStore.health {
+        case .unknown: return "unknown"
+        case .notConnected: return "no Gmail account connected"
+        case .pendingFirstSync: return "connected, first sync pending"
+        case .healthy: return "healthy"
+        case .issues: return "issues detected"
         }
     }
 
@@ -122,12 +228,34 @@ struct LedgerListView: View {
         } else {
             List {
                 ForEach(store.transactions) { transaction in
-                    Button {
-                        selectedTransaction = transaction
-                    } label: {
-                        TransactionRowView(transaction: transaction)
+                    // BACKLOG.md L3 — the payee name is its own tappable target (opens the payee
+                    // history panel), so the row can no longer be one big Button (a Button inside
+                    // a Button's label doesn't get its own tap target). `.onTapGesture` on the row
+                    // container handles "open detail" for everywhere else in the row instead.
+                    TransactionRowView(
+                        transaction: transaction,
+                        onPayeeTapped: {
+                            payeeSelection = PayeeSelection(name: transaction.payee.name)
+                        }
+                    )
+                    .contentShape(Rectangle())
+                    .onTapGesture { selectedTransaction = transaction }
+                    // BACKLOG.md J5 — quick triage without opening the sheet. Dismiss is listed
+                    // first so it sits at the swipe edge (the full-swipe action), matching the
+                    // "quick triage is quick" story; Edit sits next to it, opening J3's sheet.
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            Task { await store.dismissTransaction(baseURL: connectionSettings.baseURL, id: transaction.id) }
+                        } label: {
+                            Label("Dismiss", systemImage: "eye.slash")
+                        }
+                        Button {
+                            selectedTransaction = transaction
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                        .tint(.blue)
                     }
-                    .buttonStyle(.plain)
                 }
                 if store.hasMore {
                     HStack {

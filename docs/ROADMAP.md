@@ -130,7 +130,7 @@ Copy this block per milestone:
 - **Dependencies:** M5.
 
 ### M7: Mobile App
-- **Status:** In Progress (2026-07-19)
+- **Status:** Done (2026-07-19)
 - **Target:** TBD
 - **Goal:** Ship "Ledger," an iOS app, as an additional client of the existing backend/API (per
   [DECISIONS.md](DECISIONS.md) ADR-0003), once the web dashboard and underlying pipeline are
@@ -145,7 +145,9 @@ Copy this block per milestone:
   confirmed by the owner; native Swift + SwiftUI was chosen over a cross-platform framework
   (ADR-0023); push notifications will be in-app/foreground-only, not Apple Push and not a
   third-party relay, after both were presented and declined (ADR-0024). Detailed story breakdown
-  in [BACKLOG.md](BACKLOG.md) Epics I–M.
+  in [BACKLOG.md](BACKLOG.md) Epics I–M. **Completed 2026-07-19:** Epics I (foundation), J
+  (transaction list & correction, J1-J7), K (needs-review queue, K1-K4), L (analytics, L1-L3), and
+  M (manual add & in-app notifications, M1-M3) all done — Ledger's full backlog is built.
 
 ### M8: Multi-User Support
 - **Status:** Planned

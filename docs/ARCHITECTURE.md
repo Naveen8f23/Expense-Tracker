@@ -20,11 +20,16 @@ and same-day sort order now actually follows that time
 polish) done (2026-07-19)** — H1 (encryption verification) was already satisfied by an Epic A2
 test; H2 (manual "add a transaction" escape hatch, ADR-0022) required making
 `transactions.email_message_id` nullable, the first schema change to that table's core shape
-since Epic A. **M7 (Ledger, the iOS app) started (2026-07-19)** — a visual design concept was
-reviewed and confirmed; Swift + SwiftUI chosen (ADR-0023); new-transaction notifications will be
-in-app/foreground-only, not Apple Push and not a third-party relay (ADR-0024). No backend changes
-are implied — Ledger is a second Presentation-layer client of the existing API (§3). Detailed
-build backlog tracked in [BACKLOG.md](BACKLOG.md) (Epics I–M for Ledger).
+since Epic A. **M7 (Ledger, the iOS app) is now fully done (2026-07-19)** — a visual design concept
+was reviewed and confirmed; Swift + SwiftUI chosen (ADR-0023); new-transaction notifications are
+in-app/foreground-only, not Apple Push and not a third-party relay (ADR-0024). All of Ledger's
+backlog (Epics I–M: foundation, transaction list/correction, needs-review queue, analytics, manual
+add & notifications) is built, tested, and verified live in the Simulator. **Post-completion visual
+polish (2026-07-19, ADR-0027):** a deterministic per-category color system, a proper indigo accent
+color, and an always-dark theme (not just system-dark support) — all requested directly by the
+owner while live-testing the finished build. No backend changes are implied by any of this —
+Ledger is a second Presentation-layer client of the existing API (§3). Detailed build backlog
+tracked in [BACKLOG.md](BACKLOG.md) (Epics I–M for Ledger).
 
 This document describes the current state of the system's architecture. It should always
 reflect what *is*, not what's planned (that belongs in [ROADMAP.md](ROADMAP.md)) or why a
@@ -232,19 +237,66 @@ Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
   "Manual" badge in the table and a substituted note in `TransactionDetailPanel` where "View
   source email" would otherwise be.
 - **Mobile Client — Ledger (iOS)** — a second Presentation-layer client, alongside the Web
-  Dashboard, talking to the same API Layer only (REQUIREMENTS.md §15, ADR-0023). **M7 in progress
-  (2026-07-19): Epic I (foundation) done; Epic J (transaction list & correction) through J3.**
-  Native Swift + SwiftUI, project defined via a checked-in XcodeGen `project.yml` rather than a
-  hand-edited `.xcodeproj` (`ios/Ledger/`). Module shape mirrors the frontend's own discipline — a
-  single `Networking/APIClient.swift` wraps every backend call (no view talks to `URLSession`
-  directly, the same rule `frontend/src/api/client.ts` follows), `ViewState/` holds
+  Dashboard, talking to the same API Layer only (REQUIREMENTS.md §15, ADR-0023). **M7 done
+  (2026-07-19): Epics I, J (J1-J7), K (needs-review queue, K1-K4), L (analytics, L1-L3), and M
+  (manual add & in-app notifications, M1-M3) all complete — the full Ledger backlog is built.**
+  Native Swift + SwiftUI, project defined via a checked-in XcodeGen `project.yml` rather
+  than a hand-edited `.xcodeproj` (`ios/Ledger/`). Module shape mirrors the frontend's own
+  discipline — a single `Networking/APIClient.swift` wraps every backend call (no view talks to
+  `URLSession` directly, the same rule `frontend/src/api/client.ts` follows), `ViewState/` holds
   `ObservableObject` stores (the only layer allowed to call `Networking`), `Views/` holds SwiftUI
-  screens. Built so far: the 3-tab shell (Ledger/Analytics/Review), the connection-settings screen
-  (I3), the transaction list with full filtering/search/chips (J1-J2), and a transaction detail
-  sheet for correcting fields or dismissing a transaction (J3). New-transaction notifications will
-  be local (`UNNotificationRequest`), driven by the same `GET /transactions/recent` polling pattern
-  as the web dashboard's `useNewTransactionNotifications` hook — no APNs, no third-party push relay
-  (ADR-0024) — once Epic M is reached. Detailed stories in [BACKLOG.md](BACKLOG.md) Epics I–M.
+  screens. Built: the 3-tab shell (Ledger/Analytics/Review), the connection-settings screen
+  (I3), the transaction list with full filtering/search/chips (J1-J2), a transaction detail sheet
+  for correcting fields or dismissing a transaction (J3), the source email viewer (J4), swipe
+  actions for quick edit/dismiss (J5), a "Manage categories" screen plus inline "+ New category…"
+  in J3's picker (J6), a nav-bar sync-health dot (J7), the Review tab (K1-K4) — both halves of
+  `GET /needs-review` as separate sections with reason chips, swipe-to-ignore for unmatched emails,
+  low-confidence transactions reusing J3's own detail sheet rather than a separate form, and a tab
+  badge (`RootTabView` owns the shared `NeedsReviewStore` so the badge is visible outside
+  `ReviewView` itself) refetched on launch/tab-switch/foreground only — no polling; the
+  Analytics tab (L1-L3) — a monthly summary with a Previous/Next switcher, a category breakdown
+  sharing the same month cursor (ADR-0021), and a payee history panel reached by tapping a payee
+  name anywhere it appears (`TransactionRowView`'s `onPayeeTapped`, a `PayeeSelection` value
+  driving `.sheet(item:)`); and Epic M — a create-only "Add Transaction" sheet (M1, reached via a
+  toolbar "+", reusing J6's inline category-creation pattern) and in-app new-transaction
+  notifications (M2/M3): `ViewState/NewTransactionNotifier.swift`, owned by `RootTabView`, polls
+  `GET /transactions/recent` every ~5s while foregrounded and fires a local `UNNotificationRequest`
+  per new transaction, with `lastSeenId`/`hasBaseline` persisted in `UserDefaults` so a
+  `BGAppRefreshTask` launch (a fresh process, M3, registered in `App/LedgerApp.swift`) can resume
+  from the same baseline rather than re-treating all history as new. **Three real SwiftUI/iOS bugs
+  found and fixed via live verification across L and M — all the same underlying shape, "state
+  that must stay internally consistent, read at two different times":** a `.task` attached to a
+  `List`'s conditional content restarted unpredictably (fixed by moving the month switcher outside
+  the `List` and making it the one, explicit trigger via `.task(id:)`); a `Bool` + `String` pair
+  driving a sheet let the content closure read a stale default (fixed by replacing both with one
+  `Identifiable` optional, the same shape `selectedTransaction`/`PayeeSelection` already used
+  reliably — reused again for M2's notification-tap deep link); and the web dashboard's own
+  ADR-0019 "empty-baseline" bug was avoided proactively in M2 by keeping `hasBaseline` explicit
+  rather than inferred. M3's actual `BGAppRefreshTask` firing could not be verified in this
+  environment (Simulator + no attached debugger) — an honestly-flagged gap, not a false claim of
+  verification (see BACKLOG.md M3). Detailed stories in [BACKLOG.md](BACKLOG.md) Epics I–M.
+  **Post-completion visual polish (2026-07-19, ADR-0027; see BACKLOG.md Epic M's addendum):** a
+  new `Networking/CategoryColor.swift` assigns each category a deterministic color (a djb2 hash of
+  its name into a fixed palette of SwiftUI's built-in adaptive colors, deliberately excluding
+  `.red`/`.green` since those are reserved for debit/credit amounts) — shown as a dot next to the
+  category name, a leading stripe on every `TransactionRowView` row, and a proportional spend bar
+  in `AnalyticsView`'s category breakdown. `Assets.xcassets/AccentColor.colorset` (indigo/violet,
+  light+dark variants) replaces the default system blue; **note the color asset alone wasn't
+  sufficient** — `project.yml` needed an explicit
+  `ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor` build setting before system-tinted
+  chrome (tab bar selection, nav bar buttons) actually picked it up, confirmed by pixel-sampling
+  screenshots before/after. `LedgerApp.swift` now forces `.preferredColorScheme(.dark)` at the
+  window root — Ledger is always dark, not merely dark-mode-capable — safe to apply broadly since
+  every view already used only semantic/system colors (confirmed by grepping for
+  `Color.white`/`Color.black`/`UIColor` first). A new `Assets.xcassets/LaunchBackground.colorset`
+  (solid black) keeps the launch screen from flashing white before that dark UI appears. Also
+  fixed: debit amounts weren't red (`TransactionRowView` only colored credits, debits fell back to
+  `.primary`); the Review tab's "Ignore" action was swipe-only and easy to miss, so a visible
+  toolbar button was added to `SourceEmailView` alongside it; and that same view now renders the
+  cached email through a new `Networking/ReadableEmailContent.swift` (strips HTML tags/entities for
+  *display only* — extraction itself is untouched, and it's still plain `Text`, so no HTML-
+  rendering/tracking-pixel risk is introduced, unlike reaching for `NSAttributedString(html:)` or a
+  `WKWebView` would be). 84/84 iOS unit tests passing (8 new).
 
 Each of these is swappable independently: e.g. the `GmailClient` could later be joined by a
 second bank's client without touching Extraction, Storage, or the Dashboard; the

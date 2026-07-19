@@ -973,3 +973,55 @@ Copy this block for each new decision:
   router, not a direct Tailscale peer) rather than the originally-assumed one; (3) this ADR should
   be updated (not superseded — the historical record of what was actually wrong stays useful) once
   the interim state is closed out.
+
+### ADR-0027: Ledger is always dark-themed, with a deterministic per-category color system
+
+- **Date:** 2026-07-19
+- **Status:** Accepted
+- **Decision:** Ledger now forces dark mode everywhere (`preferredColorScheme(.dark)` at the
+  window root) regardless of the phone's own system light/dark setting, rather than merely
+  supporting dark mode when the system requests it. Alongside this, a new deterministic
+  per-category color system was added: each category name hashes to a fixed color from a curated
+  palette (`Networking/CategoryColor.swift`), shown as a small dot next to the category name and a
+  thin leading stripe on every transaction row, plus a proportional spend bar in the Analytics
+  category breakdown. A proper indigo/violet `AccentColor` asset replaces the default system blue
+  throughout (toolbar icons, selected tab, chips, badges).
+- **Context:** Raised directly by the owner while live-testing M7's build in the Simulator: the
+  app "seems pretty bland in terms of colors," then, after the color pass, asked directly to make
+  the whole app dark-themed. Presented as a tradeoff (always-dark vs. keep following the system
+  toggle, which the app already did automatically for free via semantic/system colors) — the owner
+  chose always-dark, matching the fixed-dark-identity pattern common in finance apps rather than a
+  user-configurable toggle.
+- **Alternatives considered:**
+  - **Keep following the system appearance setting** — already free (the app used only semantic
+    colors, `.primary`/`.secondary`/system list backgrounds, before this change), but doesn't match
+    what the owner actually asked for: a fixed dark identity, not "dark when the phone is in dark
+    mode."
+  - **A user-facing light/dark toggle inside the app** — rejected as unnecessary scope: nothing in
+    REQUIREMENTS.md calls for user-configurable theming, and the owner's own ask was for the app to
+    just *be* dark, not to add a setting.
+  - **Hardcoding category colors per known name** — rejected: categories are fully user-defined
+    with no fixed list (EXT-2), so any hardcoded name→color mapping would silently stop working the
+    moment the owner created a new category; a deterministic hash over the name has no such gap.
+- **Reasoning:** Always-dark is a one-line `.preferredColorScheme(.dark)` at the root, safe to
+  apply broadly specifically *because* the app had already been built entirely on adaptive system
+  colors (confirmed by grepping for `Color.white`/`Color.black`/`UIColor` before making the change
+  — none existed). The category color system reuses SwiftUI's own built-in adaptive palette
+  (`.indigo`, `.teal`, `.orange`, `.pink`, `.purple`, `.brown`, `.cyan`, `.yellow`, `.mint`,
+  `.blue` — deliberately excluding `.red`/`.green`, reserved for debit/credit amount coloring) so
+  it needed no custom per-appearance color definitions of its own.
+- **Real build gotcha found and fixed along the way:** a color asset literally named
+  "AccentColor" in `Assets.xcassets` is **not**, on its own, enough to become the app's actual
+  system-level accent color — it compiled correctly into `Assets.car` (verified directly with
+  `assetutil`) and was even readable via an explicit `Color("AccentColor")`-style lookup, but the
+  tab bar selection, nav bar buttons, and other system-tinted chrome kept rendering plain system
+  blue until `ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor` was added to the
+  target's build settings in `project.yml`. Confirmed fixed by pixel-sampling screenshots
+  before/after (system blue `(0,122-136,255)` → the actual accent `(82,78,228)`, matching the
+  asset's specified RGB almost exactly). Recorded here since XcodeGen-generated projects don't set
+  this automatically just because a colorset happens to be named "AccentColor."
+- **Consequences:** No backend changes. A new `LaunchBackground` color asset (solid black) backs
+  `UILaunchScreen` so app launch doesn't flash white before the always-dark UI appears. Any new
+  Ledger screen going forward should keep using semantic/adaptive colors only (no hardcoded
+  light-mode-only colors), and any new category-bearing UI should reuse `CategoryColor` rather
+  than inventing a second color-assignment scheme.
