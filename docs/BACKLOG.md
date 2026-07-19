@@ -990,12 +990,12 @@ on macOS and the Ubuntu VM; dashboard verified live via the Browser tool.
 
 ## Epic I — Ledger: iOS Foundation (ROADMAP.md M7)
 
-**Status: All three stories (I1-I3) code-complete (2026-07-19); epic checkpoint not yet done.**
-Every story below is presentation-only (Constitution principle 5) — no backend endpoint is added,
-changed, or removed by this epic. Native Swift + SwiftUI per ADR-0023. I1 confirmed running on the
-owner's own iPhone; I2 and I3 verified via `xcodebuild test` (17/17) and the simulator only — I3's
-settings sheet still needs a live check on the owner's phone against the real VM before the
-epic-checkpoint demo (ADR-0014's policy: demo + explicit go-ahead before Epic J starts).
+**Status: Done (2026-07-19).** Every story below is presentation-only (Constitution principle 5)
+— no backend endpoint is added, changed, or removed by this epic. Native Swift + SwiftUI per
+ADR-0023. I1 confirmed running on the owner's own iPhone; I3's live phone check surfaced the real
+VM/Tailscale reachability gap (ADR-0026) rather than an I3 defect — I3's own reachability-check
+behavior is confirmed correct. Committed together with Epic J (J1-J4) and merged to main via
+[PR #9](https://github.com/Naveen8f23/Expense-Tracker/pull/9).
 
 ### I1. Xcode project scaffold ✅
 **As** the developer, **I want** a SwiftUI app target laid out with the same dependency
@@ -1119,7 +1119,9 @@ infrastructure work, not an I3 defect.
 
 ## Epic J — Ledger: Transaction List & Correction (mirrors F1–F3, F5)
 
-**Status: J1-J4 done; J5-J7 not started.**
+**Status: J1-J4 done (committed and merged to main via
+[PR #9](https://github.com/Naveen8f23/Expense-Tracker/pull/9), together with Epic I); J5-J7 not
+started.**
 
 ### J1. Transaction list (Ledger tab) ✅
 **As** the owner-operator, **I want** my transaction history on my phone in the same
