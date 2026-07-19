@@ -97,15 +97,20 @@ Copy this block per milestone:
   payee's next new transaction automatically.
 
 ### M5: Search, History & Core Analytics (MVP Complete)
-- **Status:** Planned
-- **Target:** TBD
+- **Status:** Done
+- **Target:** 2026-07-19
 - **Goal:** Deliver the searchable expense history and the baseline summaries/analytics that
   complete the MVP as defined in REQUIREMENTS.md §13.
 - **Requirements covered:** REQUIREMENTS.md §3.6 (Search & History), §3.7 (Analytics &
   Summaries).
 - **Success criteria:** MVP definition (REQUIREMENTS.md §13) fully met end-to-end for one
   Gmail account.
-- **Dependencies:** M2–M4.
+- **Dependencies:** M2–M4. **Completed 2026-07-19:** BACKLOG.md Epic G (G1–G4) done — monthly
+  summary, category breakdown, and payee history are live on the dashboard, plus search/filter
+  UI polish (debounce, clear-all, active-filter chips). This is the last epic REQUIREMENTS.md
+  §13 lists, so the MVP is now fully met **except** the still-pending 4th email template
+  (credit card credit — REQUIREMENTS.md §8), which was never an M5 dependency and remains the
+  one open item blocking a fully-complete Appendix A.
 
 ### M6: Post-MVP Enhancements
 - **Status:** Planned

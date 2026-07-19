@@ -5,7 +5,12 @@ Status: **v1.0 — Epics A-F (Foundation through Dashboard: Review & Correction)
 (2026-07-19; PR #1-#6). The Ubuntu VM is now the owner's actual, permanent, day-to-day instance
 (ADR-0020) — running as a persistent `systemd --user` service with its own independent
 (freshly-connected, not migrated) Gmail history; the local Mac instance has been stopped.
-Epic G (Search & Analytics, MVP complete) is next, not yet started.**
+Epic G (Search & Analytics, MVP complete) is done, verified (144/144 backend tests passing on
+macOS and the Ubuntu VM), demoed live on the production VM, and confirmed by the owner
+(2026-07-19) — this completes REQUIREMENTS.md §13's MVP definition (modulo the still-pending 4th
+email template). Two same-day follow-ups the owner requested during/after the demo are included
+in the same change: showing (real-or-approximate) transaction time next to the date everywhere,
+and fixing same-day sort order to actually follow that time instead of database insertion order.**
 
 This is the detailed, implementation-level breakdown of [ROADMAP.md](ROADMAP.md) milestones
 M2–M5, into units small enough to pick up and build one at a time. ROADMAP.md stays
@@ -770,38 +775,87 @@ epic-checkpoint policy (ADR-0014).
 
 ## Epic G — Search & Analytics (ROADMAP.md M5 — MVP complete)
 
-### G1. Search/filter UI polish
+### G1. Search/filter UI polish ✅
 **As** the owner-operator, **I want** the filters from F1 to feel fast and easy to combine,
 **so that** finding a specific transaction is quick.
 
+**Scope note (no acceptance criteria given originally; resolved via AskUserQuestion 2026-07-19):**
+the owner chose **functional + visual polish**, explicitly not URL-persisted filters.
+
+**Acceptance criteria (as resolved):**
+- The free-text (`q`) and payee-contains inputs are debounced (~400ms) so typing doesn't fire one
+  request per keystroke. ✅ `frontend/src/components/TransactionsView.tsx` — a local `searchDraft`
+  state holds the controlled input values; a `useEffect` timer commits them into the actual
+  `filters` state (which triggers the fetch) only after the pause. Verified live: 6 keystrokes
+  produced exactly one `GET /transactions?q=...` request (checked via the Network tab).
+- A "Clear all filters" button resets every filter and the visible input/select/date values in
+  one action. ✅ All filter inputs became controlled (bound to `filters`/`searchDraft`) so
+  clearing state also visibly clears the DOM — the previous uncontrolled inputs couldn't have
+  supported this.
+- Active filters are shown as removable chips near the filter bar, each independently clearable.
+  ✅ A chips row renders one chip per non-empty filter with a human-readable label and a "×".
+
 **Depends on:** F1. **Size:** S.
 
-### G2. Monthly summary
+### G2. Monthly summary ✅
 **As** the owner-operator, **I want** a monthly total (and a way to move between months),
 **so that** I can see my spending at a glance (ANL-1, ANL-4).
 
 **Acceptance criteria:** a `GET /analytics/monthly` endpoint plus a dashboard view; bucketed
-consistently by transaction date (not email-received date, per Edge Cases §10).
+consistently by transaction date (not email-received date, per Edge Cases §10). ✅
+`app/application/analytics.py` (`get_monthly_summary`) + `app/presentation/analytics_router.py`.
+Reports `total_debit`/`total_credit`/`net` (ADR-0021's sign convention) for a `month=YYYY-MM`
+query param, defaulting to the current month. `frontend/src/components/AnalyticsView.tsx` adds a
+third "Analytics" tab with Previous/Next month navigation and summary cards. Verified live:
+navigating between June 2026 (no data) and July 2026 (16 transactions) updated the cards
+correctly.
 
 **Depends on:** E1, F1. **Size:** M.
 
-### G3. Category breakdown
+### G3. Category breakdown ✅
 **As** the owner-operator, **I want** to see spend by category for a selected period, **so
 that** I understand where money goes (ANL-2).
 
 **Acceptance criteria:** a `GET /analytics/by-category` endpoint plus a dashboard view (a
-simple table or bar chart is enough for MVP — no charting library commitment implied here).
+simple table or bar chart is enough for MVP — no charting library commitment implied here). ✅
+`get_category_breakdown` — debits only (ADR-0021: a refund isn't spend), grouped by category
+with an "Uncategorized" bucket for `category_id IS NULL`, ordered by total descending. Rendered
+as a plain `<table>` in `AnalyticsView.tsx` below the summary cards, reusing the same month
+cursor as G2 (ADR-0021) rather than a separate period picker.
 
 **Depends on:** G2. **Size:** M.
 
-### G4. Payee history
+### G4. Payee history ✅
 **As** the owner-operator, **I want** to see all transactions with a given payee and their
 total, **so that** I can spot patterns per merchant/person (ANL-3).
 
 **Acceptance criteria:** a `GET /analytics/by-payee/{payee}` endpoint plus a dashboard view,
-reachable by clicking a payee name from F1.
+reachable by clicking a payee name from F1. ✅ `get_payee_history` matches case-insensitively by
+exact name (ADR-0021) and 404s for a name with no transactions; a new
+`frontend/src/components/PayeeHistoryPanel.tsx` slides in (same `.panel` shape as F2's detail
+panel) when a payee name is clicked in `TransactionsView`'s table, showing totals plus a
+clickable transaction list — clicking one opens the existing `TransactionDetailPanel` on top,
+verified live end-to-end.
 
 **Depends on:** E1, F1. **Size:** S.
+
+Tests: `backend/tests/test_analytics_routes.py` (8 tests) — monthly totals across a month
+boundary and excluding dismissed rows; category breakdown excludes credits and buckets
+uncategorized separately; payee history matches case-insensitively, excludes dismissed, and 404s
+for an unknown name. 139/139 backend tests passing (8 new) on macOS and the Ubuntu VM
+(`scripts/vm_test.py`). Dashboard verified by directly driving the running UI (Browser tool)
+through every flow above, per the Definition of Done for dashboard stories — no bugs found this
+time.
+
+---
+
+## Epic G — Status: Done (2026-07-19)
+
+All four stories (G1–G4) complete — this closes out REQUIREMENTS.md §13's MVP definition, modulo
+the still-pending 4th email template (credit card credit, REQUIREMENTS.md §8). Five money-
+semantics/scope decisions not spelled out in the original story text (sign convention, debit-only
+category breakdown, shared month cursor, exact-name payee matching, no date scoping on payee
+history) are recorded as [DECISIONS.md](DECISIONS.md) ADR-0021.
 
 ---
 

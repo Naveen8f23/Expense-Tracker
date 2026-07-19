@@ -704,3 +704,49 @@ Copy this block for each new decision:
   `gmail_client_secret.json` OAuth credential file was copied directly between the owner's own two
   machines (scp, permissions locked to `600` on arrival) — never viewed or transmitted through any
   agent-authored tool output, consistent with never handling credentials in plain text.
+
+### ADR-0021: Analytics money-semantics conventions (Epic G)
+
+- **Date:** 2026-07-19
+- **Status:** Accepted
+- **Decision:** Epic G's three new endpoints (`GET /analytics/monthly`, `GET /analytics/by-category`,
+  `GET /analytics/by-payee/{payee}`) adopt five conventions not spelled out in BACKLOG.md's
+  acceptance criteria:
+  1. Every summary reports `total_debit`, `total_credit`, and `net = total_debit - total_credit`
+     (positive `net` means money spent, not received).
+  2. Category breakdown (`by-category`, ANL-2) counts **debit transactions only** — a refund/
+     credit isn't spend, so including it would understate what was actually spent in a category.
+     Category-less transactions are grouped under a synthetic `"Uncategorized"` bucket
+     (`category_id: null`).
+  3. `by-category` reuses `monthly`'s month cursor as its period unit, rather than a separate
+     arbitrary date-range picker — BACKLOG.md already states G3 "depends on" G2.
+  4. `by-payee/{payee}` matches by **case-insensitive exact name**, not substring — the dashboard
+     only ever calls this by clicking one exact payee name already shown in the transactions
+     table (BACKLOG.md G4), so a substring match would silently pull in unrelated payees.
+  5. `by-payee/{payee}` has **no date scoping** — "all transactions with a given payee," full
+     history, paginated (limit/offset, same shape as E1) since a payee's history can grow large
+     over time.
+- **Context:** BACKLOG.md's G2–G4 acceptance criteria specify the endpoint shapes and UI intent
+  but not these money-semantics/matching details. Left unresolved, each would have needed a
+  judgment call made silently inside the implementation rather than recorded anywhere.
+- **Alternatives considered:**
+  - Counting both debits and credits in the category breakdown (a plain net-per-category figure)
+    — rejected: ANL-2 is explicitly "spend by category," and a refund netting against spend in
+    the same category would understate what was actually spent, not just report it differently.
+  - Substring/fuzzy payee matching for `by-payee` — rejected for the same reason substring
+    filtering already exists as a separate, general-purpose tool (`GET /transactions?payee=`,
+    Epic E): this endpoint's one caller is always an exact click on an exact name, so exact
+    matching is both simpler and safer against accidentally merging unrelated payees.
+  - A separate arbitrary date-range picker for `by-category`, independent of `monthly`'s cursor —
+    rejected for MVP: adds a second period-selection UI for no confirmed current need, and
+    BACKLOG.md already frames G3 as depending on G2's month concept.
+- **Reasoning:** Each choice is the simplest option consistent with the "expense tracker" framing
+  (the primary lens is spending, not net cash flow) and with Constitution principle 2 (avoid
+  unnecessary abstraction) — no new UI surface (date-range picker) or matching complexity
+  (fuzzy/substring) is introduced without a concrete current need.
+- **Consequences:** Two distinct real-world payees that happen to share an identical display
+  string will have their histories merged in the `by-payee` view — this inherits the existing,
+  already-accepted "alias normalization is deferred" limitation from BACKLOG.md E3, not a new
+  gap. If a future story needs category breakdown over an arbitrary range (not just a calendar
+  month), or needs to include refunds in the category total for a different purpose, that's a new
+  decision to make then, not implied by this one.

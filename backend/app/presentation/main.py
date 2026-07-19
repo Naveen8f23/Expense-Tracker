@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from app.infrastructure.bootstrap import ensure_default_user, ensure_hdfc_sender_rules
 from app.infrastructure.db import SessionLocal
 from app.infrastructure.sync_scheduler import SyncScheduler
+from app.presentation.analytics_router import router as analytics_router
 from app.presentation.categories_router import router as categories_router
 from app.presentation.gmail_router import router as gmail_router
 from app.presentation.needs_review_router import router as needs_review_router
@@ -40,6 +41,7 @@ app.include_router(transactions_router)
 app.include_router(needs_review_router)
 app.include_router(categories_router)
 app.include_router(sync_router)
+app.include_router(analytics_router)
 
 # Local-first, single-user (ADR-0002): the only expected caller is our own dashboard,
 # running on a different dev port (Vite) or later served by this same backend. Origins are

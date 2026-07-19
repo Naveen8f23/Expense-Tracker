@@ -13,6 +13,10 @@ def serialize_transaction(txn: Transaction) -> dict:
         "currency": txn.currency,
         "txn_date": txn.txn_date.isoformat(),
         "txn_time": txn.txn_time.isoformat() if txn.txn_time else None,
+        # Not every template provides a time (the UPI templates are date-only, REQUIREMENTS.md
+        # Appendix A) -- the email's received time is exposed separately so the dashboard can
+        # show a clearly-marked approximate time for those rows rather than fabricating one.
+        "email_received_at": txn.email_message.received_at.isoformat(),
         "payee": {"id": txn.payee.id, "name": txn.payee.name, "identifier": txn.payee.identifier},
         "instrument_last4": txn.instrument_last4,
         "category_id": txn.category_id,

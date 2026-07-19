@@ -1,6 +1,6 @@
 # Architecture
 
-Status: **populated (v1.1) — Epics A-F (Foundation through Dashboard: Review & Correction) built
+Status: **populated (v1.2) — Epics A-F (Foundation through Dashboard: Review & Correction) built
 and verified; Epics B and C additionally against the owner's real Gmail account, Epic F by
 directly driving the running dashboard.** Automatic background sync added (2026-07-19, ADR-0019):
 a `SyncScheduler` polls Gmail every 5 seconds with no manual trigger, and the dashboard shows new
@@ -10,7 +10,13 @@ permanent, day-to-day instance (2026-07-19, ADR-0020)** — previously only ADR-
 connection/history (a deliberate fresh start, not a migration of the Mac's data); the local Mac
 instance has been stopped. Technology stack confirmed (ADR-0013); encryption approach revised for
 cross-platform reliability (ADR-0015: application-level field encryption, not SQLCipher). Google's
-official client libraries added for Gmail OAuth/API access (ADR-0018). Detailed build backlog
+official client libraries added for Gmail OAuth/API access (ADR-0018). **Epic G (Search &
+Analytics) done, verified, and confirmed by the owner (2026-07-19)** — a new Analytics module
+(monthly summary, category breakdown, payee history, ADR-0021) plus dashboard polish, demoed live
+on the production VM per the epic-checkpoint policy (ADR-0014). Same-day follow-ups requested by
+the owner: transaction time now shown (real or approximated) everywhere a transaction is listed,
+and same-day sort order now actually follows that time
+(`app/domain/transaction_time.py`) instead of database insertion order. Detailed build backlog
 tracked in [BACKLOG.md](BACKLOG.md).
 
 This document describes the current state of the system's architecture. It should always
@@ -166,16 +172,21 @@ Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
 - **Correction** (`CorrectTransaction` use case) — COR-1 through COR-5. **Epic E complete:**
   `app/application/correct_transaction.py` (E3) and `app/application/dismiss_transaction.py`
   (E4, COR-4). Manual "add a transaction with no email" (COR-5, H2) is not yet built.
-- **Analytics** (`BuildMonthlySummary` and similar use cases) — ANL-1 through ANL-4. Not yet
-  built (Epic G).
+- **Analytics** (`app/application/analytics.py`) — ANL-1 through ANL-4. **Epic G complete
+  (2026-07-19):** `get_monthly_summary`, `get_category_breakdown`, `get_payee_history` — plain
+  aggregation queries (`func.sum`/`group_by`) over `Transaction`, the first in this codebase.
+  Money-semantics conventions (sign convention, debit-only category spend, shared month cursor,
+  exact-name payee matching) recorded in ADR-0021 since BACKLOG.md's G2-G4 stories didn't spell
+  them out. Exposed via `app/presentation/analytics_router.py`
+  (`GET /analytics/monthly`, `GET /analytics/by-category`, `GET /analytics/by-payee/{payee}`).
 - **API Layer** — the only door into the system for any UI, current or future. **Epic E complete:**
   `app/presentation/transactions_router.py` (E1-E4, plus `GET /transactions/recent?since_id=`
   added 2026-07-19 for the dashboard to poll for newly-arrived transactions, ADR-0019),
   `needs_review_router.py` (E5, plus the F4 addendum `POST /needs-review/emails/{id}/ignore`),
-  `categories_router.py` (E6), `sync_router.py` (E7) — all registered in `main.py`. Every
-  endpoint reads/writes through an Application-layer use case; no router queries the ORM
-  directly beyond simple single-row lookups (`session.get`), keeping with the layering in
-  ARCHITECTURE.md §3.
+  `categories_router.py` (E6), `sync_router.py` (E7), `analytics_router.py` (Epic G, above) —
+  all registered in `main.py`. Every endpoint reads/writes through an Application-layer use case;
+  no router queries the ORM directly beyond simple single-row lookups (`session.get`), keeping
+  with the layering in ARCHITECTURE.md §3.
 - **Web Dashboard** — a separate front-end application; talks to the API Layer only. **Epic F
   complete (2026-07-19):** `frontend/src/components/TransactionsView.tsx` (F1),
   `TransactionDetailPanel.tsx` (F2/F3/F5 combined — correction form, source email viewer, inline
@@ -192,6 +203,16 @@ Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
   (Constitution principle 3: don't add a dependency without a concrete need); revisit once Epic G
   adds more views if this stops being simple enough. `.claude/launch.json` added so the frontend
   dev server can be previewed via the Browser tool.
+  **Epic G additions (2026-07-19):** a third "Analytics" tab
+  (`frontend/src/components/AnalyticsView.tsx`, G2/G3 — month navigation, summary cards, category
+  table) and `frontend/src/components/PayeeHistoryPanel.tsx` (G4 — a `.panel`-shaped overlay,
+  opened by clicking a payee name in `TransactionsView`'s table, matching `TransactionDetailPanel`'s
+  existing shape rather than becoming its own tab). The two-way ternary in `App.tsx` became a
+  three-way conditional chain, confirming the "revisit once Epic G adds more views" note above —
+  still no routing library needed for three views. `TransactionsView.tsx` also gained G1's
+  polish: debounced free-text/payee inputs (a `searchDraft` state separate from the
+  fetch-triggering `filters` state), a "Clear all filters" button, and removable active-filter
+  chips.
 
 Each of these is swappable independently: e.g. the `GmailClient` could later be joined by a
 second bank's client without touching Extraction, Storage, or the Dashboard; the
@@ -345,9 +366,10 @@ considered and explicitly dropped (ADR-0009) — not an integration in this syst
 
 ## 8. Known Limitations / Technical Debt
 
-- Epics A-F (Foundation through Dashboard: Review & Correction) built and verified (BACKLOG.md);
-  Epic G (Search & Analytics, MVP complete) onward not started. Automatic background sync
-  (ADR-0019) and real VM production deployment (ADR-0020) added on top of F, same day.
+- Epics A-G (Foundation through Search & Analytics) built and verified (BACKLOG.md) — this
+  completes REQUIREMENTS.md §13's MVP definition, modulo the still-pending 4th email template
+  (credit card credit, REQUIREMENTS.md §8). Automatic background sync (ADR-0019) and real VM
+  production deployment (ADR-0020) added on top of F, same day.
 - **Browser notifications only work while a dashboard tab is open** and the user has granted
   permission — there is no notification path for a closed tab or when no browser is running,
   since that would require Gmail's real push API and a public endpoint, explicitly not adopted
@@ -379,6 +401,17 @@ considered and explicitly dropped (ADR-0009) — not an integration in this syst
 - **E3's "correct the payee" only renames the shared `Payee` row**, it doesn't reassign a
   transaction to a different `Payee` entity — see BACKLOG.md E3's design note. Revisit if this
   turns out to be the wrong call now that the correction UI (Epic F) is actually in use.
+- **The dashboard's transaction time display is a real value for some rows and an approximation
+  for others** (2026-07-19) — HDFC's UPI templates never included a time to begin with
+  (REQUIREMENTS.md Appendix A), so `TransactionDateTime`
+  (`frontend/src/utils/transactionTime.tsx`) falls back to the source email's received time for
+  those rows, marked with a `~` prefix and a tooltip. This is deliberately visible rather than
+  silently fabricated (Constitution principle 21), but it does mean the "time" column isn't a
+  single consistent kind of fact across all rows. **The list/payee-history sort now accounts for
+  this** (`app/domain/transaction_time.py`'s `effective_sort_datetime`, same day as the display
+  itself shipped) — same-day transactions order correctly by whichever time is actually shown, real
+  or approximate, rather than by database insertion order. Any *new* place that lists transactions
+  should reuse this function rather than sorting by `txn_date`/`id` alone.
 - **Epic F's automated live-browser pass wasn't completed against the Ubuntu VM specifically**
   (tunnel persistence issue in this session's tool environment, see §7) — superseded later the
   same day: the VM became the real production instance (ADR-0020) and was verified live and

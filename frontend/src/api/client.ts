@@ -59,6 +59,9 @@ export interface Transaction {
   currency: string;
   txn_date: string;
   txn_time: string | null;
+  // Not every source template provides a time (the UPI templates are date-only) -- when
+  // txn_time is null, this is the fallback used for an approximate display time.
+  email_received_at: string;
   payee: Payee;
   instrument_last4: string | null;
   category_id: number | null;
@@ -192,4 +195,52 @@ export async function createCategory(name: string): Promise<Category> {
 
 export async function getSyncStatus(): Promise<SyncStatus> {
   return request(`/sync/status`);
+}
+
+export interface MonthlySummary {
+  month: string;
+  total_debit: string;
+  total_credit: string;
+  net: string;
+  transaction_count: number;
+}
+
+export async function getMonthlySummary(month?: string): Promise<MonthlySummary> {
+  return request(`/analytics/monthly${month ? `?month=${month}` : ""}`);
+}
+
+export interface CategoryBreakdownItem {
+  category_id: number | null;
+  category_name: string;
+  total: string;
+  transaction_count: number;
+}
+
+export interface CategoryBreakdown {
+  month: string;
+  categories: CategoryBreakdownItem[];
+}
+
+export async function getCategoryBreakdown(month?: string): Promise<CategoryBreakdown> {
+  return request(`/analytics/by-category${month ? `?month=${month}` : ""}`);
+}
+
+export interface PayeeHistory {
+  payee_name: string;
+  total_debit: string;
+  total_credit: string;
+  net: string;
+  transaction_count: number;
+  limit: number;
+  offset: number;
+  items: Transaction[];
+}
+
+export async function getPayeeHistory(
+  payeeName: string,
+  limit = 50,
+  offset = 0,
+): Promise<PayeeHistory> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return request(`/analytics/by-payee/${encodeURIComponent(payeeName)}?${params.toString()}`);
 }

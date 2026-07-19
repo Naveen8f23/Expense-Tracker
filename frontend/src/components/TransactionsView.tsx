@@ -6,14 +6,31 @@ import {
   type TransactionFilters,
   type TransactionType,
 } from "../api/client";
+import PayeeHistoryPanel from "./PayeeHistoryPanel";
 import TransactionDetailPanel from "./TransactionDetailPanel";
+import { TransactionDateTime } from "../utils/transactionTime";
 
 const PAGE_SIZE = 50;
+// G1: debounce free-text/payee input so typing doesn't fire one request per keystroke.
+const SEARCH_DEBOUNCE_MS = 400;
+
+const FILTER_LABELS: Partial<Record<keyof TransactionFilters, string>> = {
+  q: "Search",
+  payee: "Payee",
+  category_id: "Category",
+  txn_type: "Type",
+  payment_method: "Method",
+  date_from: "From",
+  date_to: "To",
+  amount_min: "Min ₹",
+  amount_max: "Max ₹",
+};
 
 function formatAmount(txn: Transaction): string {
   const sign = txn.txn_type === "debit" ? "-" : "+";
   return `${sign}₹${txn.amount}`;
 }
+
 
 interface Props {
   // externalRefreshSignal: bumped by the parent (e.g. when the background SyncScheduler's
@@ -31,12 +48,16 @@ export default function TransactionsView({
   onOpenedTransaction,
 }: Props) {
   const [filters, setFilters] = useState<TransactionFilters>({});
+  // Controlled draft for the two debounced free-text inputs -- kept separate from `filters` so
+  // typing feels immediate while the actual fetch-triggering state only updates after the pause.
+  const [searchDraft, setSearchDraft] = useState({ q: "", payee: "" });
   const [offset, setOffset] = useState(0);
   const [items, setItems] = useState<Transaction[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedPayee, setSelectedPayee] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
@@ -58,14 +79,45 @@ export default function TransactionsView({
     }
   }, [openTransactionId, onOpenedTransaction]);
 
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setFilters((prev) => {
+        const nextQ = searchDraft.q || undefined;
+        const nextPayee = searchDraft.payee || undefined;
+        if (prev.q === nextQ && prev.payee === nextPayee) return prev;
+        return { ...prev, q: nextQ, payee: nextPayee };
+      });
+      setOffset(0);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchDraft.q, searchDraft.payee]);
+
   function updateFilter<K extends keyof TransactionFilters>(key: K, value: TransactionFilters[K]) {
     setOffset(0);
     setFilters((prev) => ({ ...prev, [key]: value }));
   }
 
+  function removeFilter(key: keyof TransactionFilters) {
+    updateFilter(key, undefined);
+    if (key === "q" || key === "payee") {
+      setSearchDraft((prev) => ({ ...prev, [key]: "" }));
+    }
+  }
+
+  function clearAllFilters() {
+    setFilters({});
+    setOffset(0);
+    setSearchDraft({ q: "", payee: "" });
+  }
+
   function refresh() {
     setReloadToken((token) => token + 1);
   }
+
+  const activeFilterChips = (Object.entries(filters) as [keyof TransactionFilters, unknown][])
+    .filter(([, value]) => value !== undefined && value !== "")
+    .map(([key, value]) => ({ key, label: `${FILTER_LABELS[key] ?? key}: ${String(value)}` }));
 
   return (
     <div className="view">
@@ -75,14 +127,17 @@ export default function TransactionsView({
         <input
           type="text"
           placeholder="Search payee or category…"
-          onChange={(e) => updateFilter("q", e.target.value)}
+          value={searchDraft.q}
+          onChange={(e) => setSearchDraft((prev) => ({ ...prev, q: e.target.value }))}
         />
         <input
           type="text"
           placeholder="Payee contains…"
-          onChange={(e) => updateFilter("payee", e.target.value)}
+          value={searchDraft.payee}
+          onChange={(e) => setSearchDraft((prev) => ({ ...prev, payee: e.target.value }))}
         />
         <select
+          value={filters.txn_type ?? ""}
           onChange={(e) =>
             updateFilter("txn_type", (e.target.value || undefined) as TransactionType | undefined)
           }
@@ -92,6 +147,7 @@ export default function TransactionsView({
           <option value="credit">Credit</option>
         </select>
         <select
+          value={filters.payment_method ?? ""}
           onChange={(e) =>
             updateFilter(
               "payment_method",
@@ -103,19 +159,45 @@ export default function TransactionsView({
           <option value="upi">UPI</option>
           <option value="credit_card">Credit Card</option>
         </select>
-        <input type="date" onChange={(e) => updateFilter("date_from", e.target.value)} />
-        <input type="date" onChange={(e) => updateFilter("date_to", e.target.value)} />
+        <input
+          type="date"
+          value={filters.date_from ?? ""}
+          onChange={(e) => updateFilter("date_from", e.target.value || undefined)}
+        />
+        <input
+          type="date"
+          value={filters.date_to ?? ""}
+          onChange={(e) => updateFilter("date_to", e.target.value || undefined)}
+        />
         <input
           type="number"
           placeholder="Min ₹"
-          onChange={(e) => updateFilter("amount_min", e.target.value)}
+          value={filters.amount_min ?? ""}
+          onChange={(e) => updateFilter("amount_min", e.target.value || undefined)}
         />
         <input
           type="number"
           placeholder="Max ₹"
-          onChange={(e) => updateFilter("amount_max", e.target.value)}
+          value={filters.amount_max ?? ""}
+          onChange={(e) => updateFilter("amount_max", e.target.value || undefined)}
         />
+        <button type="button" onClick={clearAllFilters} disabled={activeFilterChips.length === 0}>
+          Clear all filters
+        </button>
       </div>
+
+      {activeFilterChips.length > 0 && (
+        <div className="filter-chips">
+          {activeFilterChips.map(({ key, label }) => (
+            <span key={key} className="filter-chip">
+              {label}
+              <button type="button" aria-label={`Remove ${label} filter`} onClick={() => removeFilter(key)}>
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
 
       {error && <p className="error">{error}</p>}
       {loading && <p>Loading…</p>}
@@ -136,8 +218,21 @@ export default function TransactionsView({
             <tbody>
               {items.map((txn) => (
                 <tr key={txn.id} onClick={() => setSelectedId(txn.id)} className="row-clickable">
-                  <td>{txn.txn_date}</td>
-                  <td>{txn.payee.name}</td>
+                  <td>
+                    <TransactionDateTime txn={txn} />
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedPayee(txn.payee.name);
+                      }}
+                    >
+                      {txn.payee.name}
+                    </button>
+                  </td>
                   <td>{txn.category_name ?? "—"}</td>
                   <td>{txn.payment_method === "upi" ? "UPI" : "Credit Card"}</td>
                   <td className={txn.txn_type === "debit" ? "amount-debit" : "amount-credit"}>
@@ -177,6 +272,17 @@ export default function TransactionsView({
           onClose={() => setSelectedId(null)}
           onChanged={() => {
             refresh();
+          }}
+        />
+      )}
+
+      {selectedPayee !== null && (
+        <PayeeHistoryPanel
+          payeeName={selectedPayee}
+          onClose={() => setSelectedPayee(null)}
+          onOpenTransaction={(transactionId) => {
+            setSelectedPayee(null);
+            setSelectedId(transactionId);
           }}
         />
       )}

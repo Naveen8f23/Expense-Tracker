@@ -10,8 +10,9 @@ from decimal import Decimal
 from typing import Optional
 
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
+from app.domain.transaction_time import effective_sort_datetime
 from app.infrastructure.models import Category, DebitOrCredit, Payee, PaymentMethod, Transaction, User
 
 
@@ -69,13 +70,20 @@ def list_transactions(
             or_(Payee.name.ilike(like), Payee.identifier.ilike(like), Category.name.ilike(like))
         )
 
-    total = stmt.count()
-    items = (
-        stmt.order_by(Transaction.txn_date.desc(), Transaction.id.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
+    # Sorted by effective time (real txn_time, or the source email's received time as a fallback
+    # for the date-only UPI templates -- app/domain/transaction_time.py), matching what the
+    # dashboard displays. This can't be expressed as a single SQL ORDER BY across two different
+    # source columns/tables, so it's done in Python after fetching every matching row; acceptable
+    # at this product's scale (REQUIREMENTS.md Performance NFR: "up to tens of thousands of
+    # transactions", well within what an in-memory sort handles instantly) -- revisit only if a
+    # real performance problem is ever measured (Constitution principle 16).
+    all_matching = stmt.options(joinedload(Transaction.email_message)).all()
+    all_matching.sort(
+        key=lambda t: effective_sort_datetime(t.txn_date, t.txn_time, t.email_message.received_at),
+        reverse=True,
     )
+    total = len(all_matching)
+    items = all_matching[offset : offset + limit]
     return items, total
 
 
@@ -89,6 +97,7 @@ def get_transactions_since(session: Session, user: User, since_id: int) -> list[
     return (
         session.query(Transaction)
         .join(Payee, Transaction.payee_id == Payee.id)
+        .options(joinedload(Transaction.email_message))
         .filter(
             Transaction.user_id == user.id,
             Transaction.id > since_id,
