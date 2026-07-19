@@ -1571,6 +1571,26 @@ correctly opened its history panel showing the real total and transaction count 
 This is the last epic in Ledger's backlog (BACKLOG.md Epics I–M) — M7 (ROADMAP.md) is now fully
 built.
 
+**Post-completion polish (2026-07-19, not its own story — direct owner feedback while live-testing
+the finished build in the Simulator):** three rounds of fixes/enhancements, not tied to a
+REQUIREMENTS.md story since none of this was planned in advance:
+1. Debit amounts weren't red (only credits were colored, debits fell back to plain `.primary`) —
+   fixed in `TransactionRowView`.
+2. The Review tab's unmatched-email "Ignore" action was swipe-only and not discoverable enough,
+   and the source email viewer showed raw HTML tags verbatim — added a visible "Ignore" toolbar
+   button to `SourceEmailView` (alongside the existing swipe action) and a new
+   `Networking/ReadableEmailContent.swift` that strips tags/entities for display only (extraction
+   itself is untouched; still plain `Text`, no HTML rendering risk introduced).
+3. A full visual pass, then a follow-up to make it always dark — a new deterministic
+   `Networking/CategoryColor.swift` color-codes every category consistently (dot + row stripe +
+   Analytics proportional bar), a proper indigo `AccentColor` asset replaces default system blue,
+   and the whole app now forces dark mode regardless of the phone's system setting. See
+   [DECISIONS.md](DECISIONS.md) ADR-0027 for the full reasoning, alternatives considered, and a
+   real XcodeGen/`ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME` build-setting gotcha found along
+   the way. 84/84 iOS unit tests passing (8 new: `CategoryColorTests`, `ReadableEmailContentTests`).
+   Verified live via screenshots at every step, including pixel-sampling to confirm the accent
+   color fix actually took effect.
+
 ### M1. Add Transaction sheet ✅
 **As** the owner-operator, **I want** to add a transaction with no corresponding email from my
 phone, **so that** the rare cash purchase isn't lost (COR-5, REQUIREMENTS.md MOB-6), mirroring H2.

@@ -63,11 +63,17 @@ struct ReviewView: View {
                     Section("Unmatched Emails") {
                         ForEach(store.unmatchedEmails) { email in
                             NavigationLink {
-                                SourceEmailView(email: email)
+                                SourceEmailView(email: email, onIgnore: {
+                                    await store.ignoreEmail(baseURL: connectionSettings.baseURL, id: email.id)
+                                })
                             } label: {
                                 unmatchedEmailRow(email)
                             }
                             .swipeActions(edge: .trailing) {
+                                // Same action as SourceEmailView's toolbar button below — a visible
+                                // button was added there since a swipe gesture alone turned out not
+                                // to be discoverable enough (raised directly by the owner while
+                                // testing). Kept here too since some users do expect/prefer it.
                                 Button(role: .destructive) {
                                     Task { await store.ignoreEmail(baseURL: connectionSettings.baseURL, id: email.id) }
                                 } label: {

@@ -20,11 +20,16 @@ and same-day sort order now actually follows that time
 polish) done (2026-07-19)** — H1 (encryption verification) was already satisfied by an Epic A2
 test; H2 (manual "add a transaction" escape hatch, ADR-0022) required making
 `transactions.email_message_id` nullable, the first schema change to that table's core shape
-since Epic A. **M7 (Ledger, the iOS app) started (2026-07-19)** — a visual design concept was
-reviewed and confirmed; Swift + SwiftUI chosen (ADR-0023); new-transaction notifications will be
-in-app/foreground-only, not Apple Push and not a third-party relay (ADR-0024). No backend changes
-are implied — Ledger is a second Presentation-layer client of the existing API (§3). Detailed
-build backlog tracked in [BACKLOG.md](BACKLOG.md) (Epics I–M for Ledger).
+since Epic A. **M7 (Ledger, the iOS app) is now fully done (2026-07-19)** — a visual design concept
+was reviewed and confirmed; Swift + SwiftUI chosen (ADR-0023); new-transaction notifications are
+in-app/foreground-only, not Apple Push and not a third-party relay (ADR-0024). All of Ledger's
+backlog (Epics I–M: foundation, transaction list/correction, needs-review queue, analytics, manual
+add & notifications) is built, tested, and verified live in the Simulator. **Post-completion visual
+polish (2026-07-19, ADR-0027):** a deterministic per-category color system, a proper indigo accent
+color, and an always-dark theme (not just system-dark support) — all requested directly by the
+owner while live-testing the finished build. No backend changes are implied by any of this —
+Ledger is a second Presentation-layer client of the existing API (§3). Detailed build backlog
+tracked in [BACKLOG.md](BACKLOG.md) (Epics I–M for Ledger).
 
 This document describes the current state of the system's architecture. It should always
 reflect what *is*, not what's planned (that belongs in [ROADMAP.md](ROADMAP.md)) or why a
@@ -270,6 +275,28 @@ Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
   rather than inferred. M3's actual `BGAppRefreshTask` firing could not be verified in this
   environment (Simulator + no attached debugger) — an honestly-flagged gap, not a false claim of
   verification (see BACKLOG.md M3). Detailed stories in [BACKLOG.md](BACKLOG.md) Epics I–M.
+  **Post-completion visual polish (2026-07-19, ADR-0027; see BACKLOG.md Epic M's addendum):** a
+  new `Networking/CategoryColor.swift` assigns each category a deterministic color (a djb2 hash of
+  its name into a fixed palette of SwiftUI's built-in adaptive colors, deliberately excluding
+  `.red`/`.green` since those are reserved for debit/credit amounts) — shown as a dot next to the
+  category name, a leading stripe on every `TransactionRowView` row, and a proportional spend bar
+  in `AnalyticsView`'s category breakdown. `Assets.xcassets/AccentColor.colorset` (indigo/violet,
+  light+dark variants) replaces the default system blue; **note the color asset alone wasn't
+  sufficient** — `project.yml` needed an explicit
+  `ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor` build setting before system-tinted
+  chrome (tab bar selection, nav bar buttons) actually picked it up, confirmed by pixel-sampling
+  screenshots before/after. `LedgerApp.swift` now forces `.preferredColorScheme(.dark)` at the
+  window root — Ledger is always dark, not merely dark-mode-capable — safe to apply broadly since
+  every view already used only semantic/system colors (confirmed by grepping for
+  `Color.white`/`Color.black`/`UIColor` first). A new `Assets.xcassets/LaunchBackground.colorset`
+  (solid black) keeps the launch screen from flashing white before that dark UI appears. Also
+  fixed: debit amounts weren't red (`TransactionRowView` only colored credits, debits fell back to
+  `.primary`); the Review tab's "Ignore" action was swipe-only and easy to miss, so a visible
+  toolbar button was added to `SourceEmailView` alongside it; and that same view now renders the
+  cached email through a new `Networking/ReadableEmailContent.swift` (strips HTML tags/entities for
+  *display only* — extraction itself is untouched, and it's still plain `Text`, so no HTML-
+  rendering/tracking-pixel risk is introduced, unlike reaching for `NSAttributedString(html:)` or a
+  `WKWebView` would be). 84/84 iOS unit tests passing (8 new).
 
 Each of these is swappable independently: e.g. the `GmailClient` could later be joined by a
 second bank's client without touching Extraction, Storage, or the Dashboard; the

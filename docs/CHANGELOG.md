@@ -8,6 +8,36 @@ versioned releases begin.
 
 ## [Unreleased]
 
+### Added (code)
+- **Ledger post-completion visual polish: category colors, dark theme, and two live-testing bug
+  fixes (2026-07-19).** Requested directly by the owner while live-testing the just-finished M7
+  build in the Simulator, in three rounds:
+  1. **Debit amounts weren't red** — `TransactionRowView` only colored credits green, debits fell
+     back to plain `.primary`; fixed to red, matching the web dashboard's own `.amount-debit`
+     convention.
+  2. **Review tab "Ignore" wasn't discoverable, and the source email viewer showed raw HTML** —
+     added a visible "Ignore" toolbar button to `SourceEmailView` (the swipe action alone wasn't
+     enough), and a new `Networking/ReadableEmailContent.swift` strips tags/entities for *display
+     only* (extraction is untouched; still plain `Text`, no HTML-rendering risk added).
+  3. **Full color pass, then always-dark (ADR-0027):** a new `Networking/CategoryColor.swift`
+     deterministically color-codes every category (dot + row stripe + an Analytics proportional
+     bar) from SwiftUI's built-in adaptive palette; a proper indigo `AccentColor` asset replaces
+     system blue everywhere; `LedgerApp.swift` now forces `.preferredColorScheme(.dark)` — Ledger
+     is always dark, not just dark-mode-capable, per the owner's explicit choice when presented
+     with the tradeoff (an AskUserQuestion: always-dark vs. keep following the system toggle, which
+     the app already did for free). A `LaunchBackground` asset (black) stops the launch screen
+     flashing white first.
+  - **Real build gotcha found along the way:** naming a colorset "AccentColor" in
+    `Assets.xcassets` isn't sufficient on its own — it compiled correctly (`assetutil` confirmed
+    the right RGB values) but system-tinted chrome (tab bar selection, nav buttons) kept rendering
+    plain system blue until `ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor` was added
+    to `project.yml`'s build settings — XcodeGen doesn't infer this from the folder name alone.
+    Confirmed fixed by pixel-sampling screenshots before/after.
+  - 84/84 iOS unit tests passing (8 new: `CategoryColorTests`, `ReadableEmailContentTests`).
+    Verified live at every step via Simulator screenshots (including pixel-sampling to prove the
+    accent-color fix actually took effect, not just "looked plausible"). See
+    [DECISIONS.md](DECISIONS.md) ADR-0027 and [BACKLOG.md](BACKLOG.md) Epic M's addendum.
+
 ### Added (planning, no code yet)
 - **Ledger (iOS app, ROADMAP.md M7) — visual design concept, then a five-epic backlog (2026-07-19).**
   A visual design concept (screen mockups, navigation model, endpoint mapping) was reviewed and

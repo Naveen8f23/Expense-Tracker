@@ -77,7 +77,13 @@ struct CategoryManagementView: View {
                     Text("No categories yet").foregroundStyle(.secondary)
                 } else {
                     ForEach(store.categories) { category in
-                        Text(category.name)
+                        Label {
+                            Text(category.name)
+                        } icon: {
+                            Circle()
+                                .fill(CategoryColor.color(for: category.name))
+                                .frame(width: 10, height: 10)
+                        }
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) {
                                     Task { await store.deleteCategory(baseURL: connectionSettings.baseURL, id: category.id) }

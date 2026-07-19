@@ -35,6 +35,15 @@ struct LedgerApp: App {
         WindowGroup {
             RootTabView()
                 .environmentObject(connectionSettings)
+                // Requested directly by the owner: Ledger is always dark, regardless of the
+                // phone's own system light/dark setting — a fixed identity, not a toggle. Applied
+                // once here at the window root so it also covers every `.sheet`/`.alert` presented
+                // from anywhere in the app, not just the root hierarchy itself. Safe to do broadly
+                // since every view already uses semantic/system colors (`.primary`, `.secondary`,
+                // system list backgrounds, SwiftUI's built-in adaptive palette for
+                // `CategoryColor`) rather than any hardcoded light-only color — confirmed by
+                // grepping for `Color.white`/`Color.black`/`UIColor` before making this change.
+                .preferredColorScheme(.dark)
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .background {

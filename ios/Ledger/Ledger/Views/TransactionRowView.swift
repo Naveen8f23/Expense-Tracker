@@ -14,8 +14,16 @@ struct TransactionRowView: View {
     /// transaction list) keep plain, non-interactive payee text.
     var onPayeeTapped: (() -> Void)? = nil
 
+    /// A category's color-coding (`CategoryColor`) is deterministic from its name, so the same
+    /// category always reads the same way — a thin leading stripe here doubles as a quick visual
+    /// scan aid down a long list, the same idea as the small dot next to the category caption.
+    private var categoryColor: Color { CategoryColor.color(for: transaction.categoryName) }
+
     var body: some View {
-        HStack {
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(categoryColor.opacity(0.7))
+                .frame(width: 4)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     if let onPayeeTapped {
@@ -35,19 +43,25 @@ struct TransactionRowView: View {
                             .font(.caption2)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.secondary.opacity(0.15))
+                            .background(Color.accentColor.opacity(0.15))
+                            .foregroundStyle(Color.accentColor)
                             .clipShape(Capsule())
                     }
                 }
-                Text(transaction.categoryName ?? "Uncategorized")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(categoryColor)
+                        .frame(width: 6, height: 6)
+                    Text(transaction.categoryName ?? "Uncategorized")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
                 Text(amountText)
                     .font(.body.monospacedDigit())
-                    .foregroundStyle(transaction.txnType == "credit" ? .green : .primary)
+                    .foregroundStyle(transaction.txnType == "credit" ? .green : .red)
                 Text(TransactionDisplayTime.string(for: transaction))
                     .font(.caption)
                     .foregroundStyle(.secondary)

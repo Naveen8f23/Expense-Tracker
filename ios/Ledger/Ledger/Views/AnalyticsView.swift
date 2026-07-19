@@ -66,16 +66,29 @@ struct AnalyticsView: View {
             if !store.categoryBreakdown.isEmpty {
                 // ANL-2, debit-only (a refund isn't spend) — already enforced server-side
                 // (ADR-0021); this view reuses whatever order/bucketing the backend returns
-                // rather than reinterpreting it.
+                // rather than reinterpreting it. The proportional bar is purely a display
+                // computation over that same data, not a second source of truth for the totals.
                 Section("By Category") {
                     ForEach(store.categoryBreakdown) { item in
-                        HStack {
-                            Text(item.categoryName)
-                            Spacer()
-                            Text("\u{20B9}\(item.total)")
-                                .font(.body.monospacedDigit())
-                                .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Circle()
+                                    .fill(CategoryColor.color(for: item.categoryName))
+                                    .frame(width: 8, height: 8)
+                                Text(item.categoryName)
+                                Spacer()
+                                Text("\u{20B9}\(item.total)")
+                                    .font(.body.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                            GeometryReader { geometry in
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(CategoryColor.color(for: item.categoryName).opacity(0.35))
+                                    .frame(width: geometry.size.width * categoryShare(item), height: 4)
+                            }
+                            .frame(height: 4)
                         }
+                        .padding(.vertical, 2)
                     }
                 }
             } else if store.monthly != nil {
@@ -106,6 +119,15 @@ struct AnalyticsView: View {
             }
             .accessibilityLabel("Next month")
         }
+    }
+
+    /// This category's share of the breakdown's total spend, as a `0...1` fraction for the bar's
+    /// width — a display-only computation, purely derived from what's already on screen.
+    private func categoryShare(_ item: CategoryBreakdownItem) -> Double {
+        let categoryTotal = Double(item.total) ?? 0
+        let grandTotal = store.categoryBreakdown.reduce(0.0) { $0 + (Double($1.total) ?? 0) }
+        guard grandTotal > 0 else { return 0 }
+        return min(categoryTotal / grandTotal, 1.0)
     }
 
     private func amountText(_ value: String, color: Color) -> some View {

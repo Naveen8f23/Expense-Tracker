@@ -70,6 +70,12 @@ struct RootTabView: View {
             guard notifier.deepLinkTransactionId != nil, let baseURL = connectionSettings.baseURL else { return }
             deepLinkCategories = (try? await APIClient(baseURL: baseURL).listCategories().items) ?? []
         }
+        // The "AccentColor" asset alone didn't reach system controls (tab bar selection, nav bar
+        // buttons, DatePicker chevrons) in this build — confirmed by pixel-sampling a screenshot,
+        // they rendered plain system blue despite the asset compiling correctly (`assetutil`
+        // confirmed its RGB values). Setting `.tint` explicitly here, once, at the root guarantees
+        // every descendant reads it via the environment rather than depending on that implicit link.
+        .tint(Color.accentColor)
     }
 
     private func refreshNeedsReview() async {
