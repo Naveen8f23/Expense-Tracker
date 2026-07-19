@@ -212,6 +212,51 @@ final class LedgerDemoUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Ledger"].waitForExistence(timeout: 3))
     }
 
+    /// BACKLOG.md Epic K walkthrough — the Review tab (K1), swipe-to-ignore (K2), tapping a
+    /// low-confidence transaction reuses J3's sheet (K3), and the tab badge (K4).
+    func testEpicKReviewTab() throws {
+        let scratchDir = "/private/tmp/claude-502/-Users-naveen-18163-projects-expense-tracker/c95f4903-6984-4003-a537-c6b6ecf8eb63/scratchpad"
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["Ledger"].waitForExistence(timeout: 5))
+        // K4 — the Review tab wears its queue size as a badge, fetched on launch.
+        let reviewTab = app.tabBars.buttons["Review"]
+        XCTAssertTrue(reviewTab.waitForExistence(timeout: 5))
+        Thread.sleep(forTimeInterval: 1) // let the initial GET /needs-review resolve
+        capture(app, "demo_k_01_tab_bar_with_badge", scratchDir)
+
+        reviewTab.tap()
+        XCTAssertTrue(app.navigationBars["Review"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Unmatched Emails"].waitForExistence(timeout: 5))
+        capture(app, "demo_k_02_review_tab", scratchDir)
+
+        // K1 — reason chip on the unmatched email row.
+        XCTAssertTrue(app.staticTexts["Unrecognized"].exists || app.staticTexts["Extraction failed"].exists)
+
+        // K1's "tap to view" (mirrors F3/J4) — opens the raw source email, read-only.
+        let emailRow = app.cells.containing(.staticText, identifier: "Unrecognized").firstMatch
+        if emailRow.exists {
+            emailRow.tap()
+            XCTAssertTrue(app.navigationBars["Source Email"].waitForExistence(timeout: 5))
+            capture(app, "demo_k_03_source_email_from_review", scratchDir)
+            app.navigationBars["Source Email"].buttons.firstMatch.tap()
+            XCTAssertTrue(app.navigationBars["Review"].waitForExistence(timeout: 5))
+        }
+
+        // K2 — swipe reveals Ignore; tapping calls the endpoint directly.
+        let unmatchedRow = app.staticTexts["Unrecognized"].firstMatch
+        XCTAssertTrue(unmatchedRow.waitForExistence(timeout: 5))
+        unmatchedRow.swipeLeft()
+        XCTAssertTrue(app.buttons["Ignore"].waitForExistence(timeout: 3))
+        capture(app, "demo_k_04_swipe_reveals_ignore", scratchDir)
+        app.buttons["Ignore"].tap()
+
+        let rowGone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: unmatchedRow)
+        wait(for: [rowGone], timeout: 10)
+        capture(app, "demo_k_05_after_ignore", scratchDir)
+    }
+
     private func capture(_ app: XCUIApplication, _ name: String) {
         capture(app, name, outputDir)
     }

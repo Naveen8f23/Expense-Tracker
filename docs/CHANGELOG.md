@@ -40,6 +40,19 @@ versioned releases begin.
   I3 updated to name this specific mechanism.
 
 ### Added (code)
+- **Epic K complete: K1-K4 (2026-07-19), the needs-review queue.** New `Views/ReviewView.swift`
+  (replacing I1's placeholder) + `ViewState/NeedsReviewStore.swift` — lists both halves
+  `GET /needs-review` returns as separate sections with reason chips ("Unrecognized" /
+  "Extraction failed" for unmatched emails, "Low confidence" for transactions), swipe-to-ignore for
+  unmatched emails, and low-confidence transactions reusing J3's own detail sheet rather than a
+  separate review-specific form. The Review tab's badge count is now owned by `RootTabView` (not
+  `ReviewView` itself, so the tab item can read it) and refetched on launch, tab-switch, and
+  app-foreground only — no polling. 58/58 iOS unit tests passing (6 new). K1, K2, and K4 verified
+  live against the real local backend (one real unmatched email — a credit card bill payment via
+  net banking, the known 5th HDFC shape from Epic C — showed its "Unrecognized" chip, and
+  swipe-to-ignore correctly flipped its status server-side, reverted afterward since it was
+  verification, not a real user action); K3 verified by code/tests only, since no real
+  low-confidence transaction existed to drive through live this session.
 - **Epic J complete: J5-J7 (2026-07-19), closing out Epic J entirely.** J5 (swipe actions) adds
   native `swipeActions` to each list row — Edit opens J3's sheet, Dismiss calls
   `POST /transactions/{id}/dismiss` directly and removes the row locally. J6 (category management)

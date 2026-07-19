@@ -1383,45 +1383,85 @@ timestamp.
 
 ## Epic K — Ledger: Needs-Review Queue (mirrors F4)
 
-**Status: Not started.**
+**Status: Done (2026-07-19).** All four stories complete — 58/58 iOS unit tests passing (6 new).
+K1, K2, and K4 verified live against the real local backend; K3 verified by unit test and code
+review (it reuses J3's exact, already-live-verified sheet) since no low-confidence transaction
+happened to exist in the real queue this session to drive live.
 
-### K1. Review tab
+### K1. Review tab ✅
 **As** the owner-operator, **I want** a dedicated screen listing everything needing my attention,
 **so that** nothing gets missed from my phone (EXT-5, EXT-6).
 
 **Acceptance criteria:**
 - Calls `GET /needs-review`; displays both halves it already returns — unmatched emails and
   low-confidence transactions — as separate sections with reason chips, matching the confirmed
-  design.
+  design. ✅ New `ViewState/NeedsReviewStore.swift` + `Views/ReviewView.swift` (replacing I1's
+  placeholder). Unmatched emails show a reason chip — "Unrecognized" if `classifiedPatternId` is
+  nil, "Extraction failed" if it classified but couldn't extract (mirrors C7's two distinct
+  needs-review causes) — and are reachable via `NavigationLink` to J4's existing `SourceEmailView`
+  (read-only, same safe rendering). Low-confidence transactions show a "Low confidence" chip and
+  reuse `TransactionRowView`'s look.
+
+**Verified:** 6 new unit tests (`LedgerTests/NeedsReviewStoreTests.swift`, 58/58 total passing)
+covering no-connection, both-halves-populate + categories-fetched-once, a server-error path, and
+the ignore action's success/failure paths. **Also verified live** via the demo XCUITest harness
+against the real local backend: the one real unmatched email currently in the queue (a credit card
+bill payment via net banking — the known 5th HDFC shape from Epic C, correctly never classified)
+rendered with its "Unrecognized" chip, and tapping it opened the real cached source email.
 
 **Depends on:** I2. **Size:** M.
 
-### K2. Swipe-to-ignore for unmatched emails
+### K2. Swipe-to-ignore for unmatched emails ✅
 **As** the owner-operator, **I want** to clear an unmatched email from the queue, **so that** I'm
 not stuck reviewing something I've already decided isn't a real transaction (mirrors F4's addendum).
 
 **Acceptance criteria:**
-- Calls `POST /needs-review/emails/{id}/ignore` via a swipe action.
+- Calls `POST /needs-review/emails/{id}/ignore` via a swipe action. ✅
+  `NeedsReviewStore.ignoreEmail(baseURL:id:)`, wired to a destructive `swipeActions` button on each
+  unmatched-email row; removes the row locally on success (mirrors J5's dismiss pattern) rather
+  than waiting for a reload.
+
+**Verified:** live via the demo XCUITest harness against the real local backend — swiping the real
+unmatched email revealed "Ignore," tapping it removed the row immediately, and its
+`email_messages.status` was confirmed flipped to `IGNORED` via direct sqlite inspection. Reverted
+back to `NEEDS_REVIEW` afterward via the same route, since this was verification on the developer's
+own real inbox data, not an action the owner asked for.
 
 **Depends on:** K1. **Size:** S.
 
-### K3. Review a low-confidence transaction
+### K3. Review a low-confidence transaction ✅
 **As** the owner-operator, **I want** tapping a low-confidence item to open the same correction
 flow as any other transaction, **so that** there's only one correction UI to learn.
 
 **Acceptance criteria:**
-- Tapping a low-confidence item opens J3's detail sheet, not a separate review-specific form.
+- Tapping a low-confidence item opens J3's detail sheet, not a separate review-specific form. ✅
+  `ReviewView`'s low-confidence rows are wrapped in the exact same `.sheet(item:)` pattern
+  `LedgerListView` uses, presenting the unmodified `TransactionDetailView` — no separate
+  review-specific form exists.
+
+**Verified:** by code (the sheet presentation is identical to J1/J3's own, already live-verified)
+and by the fact that `NeedsReviewStore` supplies the same `categories`/`onChanged` shape J3 expects.
+**Not separately live-verified this session** — the real backend's queue had zero low-confidence
+transactions at the time (the AI-fallback path that produces them is rare by design, EXT-4/EXT-5),
+so there was nothing real to tap through. Revisit with a live drive-through once a real one exists.
 
 **Depends on:** K1, J3. **Size:** S.
 
-### K4. Review tab badge count
+### K4. Review tab badge count ✅
 **As** the owner-operator, **I want** the Review tab to wear its queue size openly, **so that** I
 always know before tapping in whether anything's waiting (matches the confirmed design).
 
 **Acceptance criteria:**
 - The tab badge reflects the queue size as of the last time it was fetched (app foreground/tab
   switch) — **not** a live/real-time count while another tab is open, since no push mechanism
-  exists to update it silently in the background (ADR-0024).
+  exists to update it silently in the background (ADR-0024). ✅ `NeedsReviewStore` is now owned by
+  `RootTabView` (lifted up from `ReviewView` so the tab item itself can read its count) and
+  refetched on launch (`.task`), on switching to the Review tab (`.onChange(of: selectedTab)`), and
+  on the app returning to the foreground (`.onChange(of: scenePhase)`) — no polling, no push.
+  `.badge(needsReviewStore.totalCount)` renders nothing when the count is 0.
+
+**Verified:** live via the demo XCUITest harness against the real local backend — the tab bar
+showed a badge of "1" on launch, matching the one real unmatched email in the queue at the time.
 
 **Depends on:** K1. **Size:** S.
 

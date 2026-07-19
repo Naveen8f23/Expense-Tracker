@@ -233,7 +233,7 @@ Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
   source email" would otherwise be.
 - **Mobile Client — Ledger (iOS)** — a second Presentation-layer client, alongside the Web
   Dashboard, talking to the same API Layer only (REQUIREMENTS.md §15, ADR-0023). **M7 in progress
-  (2026-07-19): Epic I (foundation) and Epic J (transaction list & correction, J1-J7) both done.**
+  (2026-07-19): Epics I, J (J1-J7), and K (needs-review queue, K1-K4) all done.**
   Native Swift + SwiftUI, project defined via a checked-in XcodeGen `project.yml` rather than a
   hand-edited `.xcodeproj` (`ios/Ledger/`). Module shape mirrors the frontend's own discipline — a
   single `Networking/APIClient.swift` wraps every backend call (no view talks to `URLSession`
@@ -243,10 +243,15 @@ Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
   (I3), the transaction list with full filtering/search/chips (J1-J2), a transaction detail sheet
   for correcting fields or dismissing a transaction (J3), the source email viewer (J4), swipe
   actions for quick edit/dismiss (J5), a "Manage categories" screen plus inline "+ New category…"
-  in J3's picker (J6), and a nav-bar sync-health dot (J7). New-transaction notifications will be
-  local (`UNNotificationRequest`), driven by the same `GET /transactions/recent` polling pattern as
-  the web dashboard's `useNewTransactionNotifications` hook — no APNs, no third-party push relay
-  (ADR-0024) — once Epic M is reached. Detailed stories in [BACKLOG.md](BACKLOG.md) Epics I–M.
+  in J3's picker (J6), a nav-bar sync-health dot (J7), and the Review tab (K1-K4) — both halves of
+  `GET /needs-review` as separate sections with reason chips, swipe-to-ignore for unmatched emails,
+  low-confidence transactions reusing J3's own detail sheet rather than a separate form, and a tab
+  badge (`RootTabView` owns the shared `NeedsReviewStore` so the badge is visible outside
+  `ReviewView` itself) refetched on launch/tab-switch/foreground only — no polling. New-transaction
+  notifications will be local (`UNNotificationRequest`), driven by the same `GET /transactions/recent`
+  polling pattern as the web dashboard's `useNewTransactionNotifications` hook — no APNs, no
+  third-party push relay (ADR-0024) — once Epic M is reached. Detailed stories in
+  [BACKLOG.md](BACKLOG.md) Epics I–M.
 
 Each of these is swappable independently: e.g. the `GmailClient` could later be joined by a
 second bank's client without touching Extraction, Storage, or the Dashboard; the
