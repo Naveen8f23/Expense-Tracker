@@ -114,7 +114,7 @@ resolve, because vendor emails are no longer ingested at all.
 
 | Category | Requirement |
 |---|---|
-| **Deployment model** | Local-first: the application and its data run on a single machine the user controls, per [DECISIONS.md](DECISIONS.md) ADR-0002. No multi-tenant cloud hosting in v1. |
+| **Deployment model** | Local-first: the application and its data run on a single machine the user controls, per [DECISIONS.md](DECISIONS.md) ADR-0002. No multi-tenant cloud hosting in v1. **Refined 2026-07-19 (ADR-0020):** "a single machine the user controls" is now the owner's own Ubuntu VM (previously only a cross-platform test target, ADR-0017) rather than their Mac — still fully local-first (their own machine, not a third-party cloud service), running persistently as a `systemd --user` service. |
 | **Primary interface** | Web dashboard (browser-based UI), served locally, per ADR-0003. A mobile app is planned for a later phase, consuming the same backend/API rather than a separate pipeline. |
 | **Currency** | INR-only for MVP; every monetary value is stored with an explicit currency code so multi-currency is additive, not a rewrite, per ADR-0004. |
 | **Security — credentials** | Gmail OAuth tokens are stored encrypted at rest (application-level encryption, per ADR-0015), never logged, and scoped to the minimum permission needed (read-only). Token refresh and revocation must be handled gracefully (see Edge Cases §10). |
@@ -183,6 +183,12 @@ the domain requires and why.
 8. **The user does not require real-time (sub-minute) transaction detection** — periodic
    polling sync is acceptable, since Gmail push notifications would require a publicly
    reachable endpoint, in tension with the local-first deployment model.
+   **Refined 2026-07-19 (ADR-0019):** this remains true as a *requirement* (nothing here demands
+   sub-minute detection), but the owner asked for automatic background sync with a fast poll
+   interval anyway, wanting a push-notification-like feel without a manual sync action. Built as
+   a 5-second local poll (`SyncScheduler`) + browser notifications while the dashboard tab is
+   open — comfortably within this assumption's spirit (still polling, still local-first, no
+   public endpoint), just faster than the minimum this assumption requires.
 9. **Confirmed 2026-07-18:** these four email types capture the large majority of the user's
    spending. A small, occasional residue (e.g. cash purchases) falls outside this scope and is
    accepted as a known, minor gap — not something the system needs to solve for. Covered by

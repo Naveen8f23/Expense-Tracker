@@ -1,11 +1,17 @@
 # Architecture
 
-Status: **populated (v0.8) — Epics A-E (Foundation, Gmail Ingestion, Classification & Extraction,
-Deduplication, API Layer) built and verified, both on macOS and the Ubuntu deployment VM; Epics B
-and C additionally against the owner's real Gmail account.** Technology stack confirmed
-(ADR-0013); encryption approach revised for cross-platform reliability (ADR-0015: application-level
-field encryption, not SQLCipher). Google's official client libraries added for Gmail OAuth/API
-access (ADR-0018). Detailed build backlog tracked in [BACKLOG.md](BACKLOG.md).
+Status: **populated (v1.1) — Epics A-F (Foundation through Dashboard: Review & Correction) built
+and verified; Epics B and C additionally against the owner's real Gmail account, Epic F by
+directly driving the running dashboard.** Automatic background sync added (2026-07-19, ADR-0019):
+a `SyncScheduler` polls Gmail every 5 seconds with no manual trigger, and the dashboard shows new
+transactions live via polling + browser notifications. **The Ubuntu VM is now the owner's real,
+permanent, day-to-day instance (2026-07-19, ADR-0020)** — previously only ADR-0017's cross-platform
+*test* target, it now runs a persistent `systemd --user` service with its own independent Gmail
+connection/history (a deliberate fresh start, not a migration of the Mac's data); the local Mac
+instance has been stopped. Technology stack confirmed (ADR-0013); encryption approach revised for
+cross-platform reliability (ADR-0015: application-level field encryption, not SQLCipher). Google's
+official client libraries added for Gmail OAuth/API access (ADR-0018). Detailed build backlog
+tracked in [BACKLOG.md](BACKLOG.md).
 
 This document describes the current state of the system's architecture. It should always
 reflect what *is*, not what's planned (that belongs in [ROADMAP.md](ROADMAP.md)) or why a
@@ -113,10 +119,14 @@ Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
   - **B5:** sync health — the shared message-storing step now catches a per-message
     `GmailIngestionError` and counts it as failed rather than aborting the whole run; `sync_state`
     carries start time and scanned/matched/skipped/failed counts (migration `96b145d41d66`).
-  - **Not yet built:** the `SyncScheduler` itself — nothing calls `run_incremental_sync`
-    automatically yet; explicitly deferred until Epic C gives newly-synced emails somewhere to
-    go (BACKLOG.md B4). Epic C now exists (below), but a scheduler still isn't built — deferred
-    further until there's a concrete reason to run sync unattended, per Constitution principle 2.
+  - **`SyncScheduler` built (2026-07-19, ADR-0019):** `app/infrastructure/sync_scheduler.py` — a
+    plain `threading.Thread` polling every 5 seconds by default
+    (`SYNC_POLL_INTERVAL_SECONDS`), running `run_incremental_sync` then
+    `run_classify_and_extract` each cycle; started/stopped from FastAPI's lifespan hook
+    (`app/presentation/main.py`). No manual "sync now" trigger exists or is needed — this was
+    deferred through Epics B–F (per Constitution principle 2, no concrete reason yet existed to
+    run sync unattended) until the owner explicitly asked for automatic updates while live-testing
+    Epic F's dashboard.
 - **Classification** (`SenderRule` matching — see Appendix A in REQUIREMENTS.md) — ING-3a. **Epic
   C complete (2026-07-19):** `app/domain/classification.py` — pure content-pattern matchers
   (`is_upi_debit`, `is_upi_credit`, `is_credit_card_debit`) plus `classify()`, which picks the one
@@ -131,8 +141,8 @@ Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
   every `UNPROCESSED` `EmailMessage`: classify → extract → create a `Transaction` (auto-accepted
   on a clean fixed-rule match; flagged `NEEDS_REVIEW` if only the AI fallback produced it) →
   mark the email `MATCHED`, or mark it `NEEDS_REVIEW` if nothing could extract it at all (EXT-6).
-  Nothing calls this automatically yet, same explicit-deferral reasoning as the `SyncScheduler`
-  above.
+  Now called automatically every cycle by the `SyncScheduler` above (ADR-0019), not just
+  on-demand.
 - **Deduplication** — DUP-1, DUP-2. **Epic D complete (2026-07-19), no new code:** both
   guarantees already existed by construction from earlier epics — `email_messages.message_id` and
   `transactions.email_message_id` are both `unique` (A2), and `run_classify_and_extract` only
@@ -159,14 +169,29 @@ Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
 - **Analytics** (`BuildMonthlySummary` and similar use cases) — ANL-1 through ANL-4. Not yet
   built (Epic G).
 - **API Layer** — the only door into the system for any UI, current or future. **Epic E complete:**
-  `app/presentation/transactions_router.py` (E1-E4), `needs_review_router.py` (E5),
+  `app/presentation/transactions_router.py` (E1-E4, plus `GET /transactions/recent?since_id=`
+  added 2026-07-19 for the dashboard to poll for newly-arrived transactions, ADR-0019),
+  `needs_review_router.py` (E5, plus the F4 addendum `POST /needs-review/emails/{id}/ignore`),
   `categories_router.py` (E6), `sync_router.py` (E7) — all registered in `main.py`. Every
   endpoint reads/writes through an Application-layer use case; no router queries the ORM
   directly beyond simple single-row lookups (`session.get`), keeping with the layering in
   ARCHITECTURE.md §3.
-- **Web Dashboard** — a separate front-end application; talks to the API Layer only. Not yet
-  built (Epic F onward) — Epic E's endpoints have only been exercised via automated `TestClient`
-  requests, not a real browser session yet.
+- **Web Dashboard** — a separate front-end application; talks to the API Layer only. **Epic F
+  complete (2026-07-19):** `frontend/src/components/TransactionsView.tsx` (F1),
+  `TransactionDetailPanel.tsx` (F2/F3/F5 combined — correction form, source email viewer, inline
+  category creation), `NeedsReviewView.tsx` (F4). `frontend/src/api/client.ts` extended with
+  typed functions for every Epic E/F endpoint — still the only place in the frontend that calls
+  `fetch`. **Automatic live updates added same day (ADR-0019):**
+  `frontend/src/hooks/useNewTransactionNotifications.ts` polls `GET /transactions/recent` every
+  5 seconds; when new transactions appear, it triggers a table refresh (via a `refreshSignal`
+  prop threaded into `TransactionsView`) and fires a browser `Notification` per new transaction
+  (permission requested via a one-time button click in `App.tsx` — browsers require an explicit
+  user gesture, it can't be granted programmatically) whose `onclick` opens that transaction's
+  detail panel directly. No routing library was added (React Router, etc.) — simple `useState`-driven view
+  switching in `App.tsx` was judged sufficient for the two current top-level views
+  (Constitution principle 3: don't add a dependency without a concrete need); revisit once Epic G
+  adds more views if this stops being simple enough. `.claude/launch.json` added so the frontend
+  dev server can be previewed via the Browser tool.
 
 Each of these is swappable independently: e.g. the `GmailClient` could later be joined by a
 second bank's client without touching Extraction, Storage, or the Dashboard; the
@@ -290,15 +315,58 @@ considered and explicitly dropped (ADR-0009) — not an integration in this syst
     out even though `ping` and `ssh` both succeed and the VM's own firewall (`ufw`) is inactive.
     The tunnel rides over the already-permitted SSH connection instead. Configurable via
     `VM_HOST`/`VM_REMOTE_DIR`/`BACKEND_PORT`/`FRONTEND_PORT` env vars (see `scripts/_vm.py`).
+  - **Gap found during Epic F (2026-07-19):** `_STOP_REMOTE_SERVERS`'s pkill patterns
+    (`vm_dev.py`) don't match an orphaned `multiprocessing` worker left over from an earlier
+    `--reload`-mode uvicorn session — its command line never contains the literal
+    `uvicorn app.presentation.main` the pattern looks for. Such a leftover process silently keeps
+    answering health checks on the same port while a fresh `dev.py` invocation fails to bind and
+    exits, making it look (from a bare health check) like the new code is running when it isn't.
+    Not yet fixed in the tooling; killed by hand this session
+    (`ssh $VM_HOST "kill -9 <pid>"`, found via `ss -tlnp`). Also: in the tool environment used for
+    this session specifically, a backgrounded `ssh -L` tunnel process didn't reliably persist
+    across separate tool invocations, so Epic F's dashboard could not be verified live against
+    the VM specifically in this session — `scripts/dev.py` was confirmed to start both servers
+    correctly there directly (its own log showed a clean Vite startup), just not tunneled back to
+    a browser this time. Since the dashboard is plain client-side React/Vite with no OS-specific
+    code, this is a lower-risk gap than the backend/interpreter divergence ADR-0016 covers.
+  - **`scripts/vm_dev.py` is for interactive dev/test only — it now conflicts with the real
+    deployment (ADR-0020).** The VM's persistent `systemd --user expense-tracker` service already
+    occupies port 8000. Running `vm_dev.py start` (ephemeral `--reload` dev servers) at the same
+    time will fail to bind that port. Stop the persistent service first
+    (`ssh $VM_HOST systemctl --user stop expense-tracker`) if `vm_dev.py`-style interactive
+    testing against the VM is genuinely needed, and restart it afterward (or just run
+    `scripts/deploy_vm.py`, which restarts it as part of a normal deploy).
+- **Deployment (ADR-0020):** `scripts/deploy_vm.py` is the one command for pushing a code change
+  to the VM's real, persistent instance — sync, backend deps, `alembic upgrade head`, frontend
+  rebuild, `systemctl --user restart`, then a health check. See `deploy/README.md` for the
+  one-time setup (`systemd --user` service install + `sudo loginctl enable-linger`, run by the
+  owner directly — the only step that ever needs their password, and it's never asked for or
+  handled through an agent).
 
 ## 8. Known Limitations / Technical Debt
 
-- Epics A-E (Foundation, Gmail Ingestion, Classification & Extraction, Deduplication, API Layer)
-  built and verified (BACKLOG.md); Epic F (Dashboard) onward not started.
-- **No dashboard exists yet to actually drive Epic E's endpoints through a browser** — verified
-  via automated `TestClient` requests only. This is a real gap for the "actual running UI is
-  driven directly" Definition-of-Done criterion that applies once Epics F-G exist; not a gap for
-  Epic E itself, whose criteria are all API-contract-level.
+- Epics A-F (Foundation through Dashboard: Review & Correction) built and verified (BACKLOG.md);
+  Epic G (Search & Analytics, MVP complete) onward not started. Automatic background sync
+  (ADR-0019) and real VM production deployment (ADR-0020) added on top of F, same day.
+- **Browser notifications only work while a dashboard tab is open** and the user has granted
+  permission — there is no notification path for a closed tab or when no browser is running,
+  since that would require Gmail's real push API and a public endpoint, explicitly not adopted
+  (ADR-0019). New transactions still appear in the table on the next poll either way; only the
+  *notification* depends on the tab being open.
+- **Two writer threads now touch the same SQLite file** (the `SyncScheduler`'s background thread
+  and the FastAPI request-handling thread(s)) — relies on `check_same_thread=False` (already set,
+  ADR-0015) plus sqlite3's default 5-second busy-timeout to absorb rare write overlaps, rather
+  than an explicit retry/backoff layer. Acceptable at single-user, low-write-volume scale; revisit
+  if "database is locked" errors ever actually surface in practice.
+- **Bug found and fixed via live verification (2026-07-19):** the dashboard's new-transaction
+  polling hook tracked "have I established a baseline yet" as `lastSeenId === null`, which broke
+  when zero transactions existed at page load — the first genuinely new transaction afterward was
+  silently absorbed into the (still-null) baseline instead of triggering a refresh/notification.
+  Fixed with an explicit `hasBaseline` flag, independent of what `lastSeenId` happens to be.
+  Caught by literally inserting a transaction into an empty throwaway database and watching the
+  dashboard fail to react — exactly the class of bug a written unit test (this project's frontend
+  has none, per its browser-automation-driven testing strategy) might have also caught, but this
+  is the mechanism actually in place.
 - **Classification doesn't yet narrow candidates by the specific sender an email came from** —
   `run_classify_and_extract` tries every configured `SenderRule.content_pattern_id` against every
   processed email, since `EmailMessage` doesn't record which sender address produced it. Correct
@@ -307,10 +375,25 @@ considered and explicitly dropped (ADR-0009) — not an integration in this syst
 - No `Category` is ever assigned automatically from email content (EXT-2, by design) — a new
   `Transaction` only gets a non-null `category_id` if its payee already has a remembered default
   (COR-2, Epic E); a first-ever transaction from a brand-new payee is still uncategorized until a
-  user assigns one (Epic F).
+  user assigns one, now possible via the dashboard (Epic F).
 - **E3's "correct the payee" only renames the shared `Payee` row**, it doesn't reassign a
   transaction to a different `Payee` entity — see BACKLOG.md E3's design note. Revisit if this
-  turns out to be the wrong call once the correction UI (Epic F) is actually used.
+  turns out to be the wrong call now that the correction UI (Epic F) is actually in use.
+- **Epic F's automated live-browser pass wasn't completed against the Ubuntu VM specifically**
+  (tunnel persistence issue in this session's tool environment, see §7) — superseded later the
+  same day: the VM became the real production instance (ADR-0020) and was verified live and
+  directly by the owner themselves (real OAuth connect, real backfill, real ongoing sync), a
+  stronger check than an agent-driven browser pass would have been anyway.
+- **The Mac's local database and the VM's database are now two independent, diverging histories**
+  (ADR-0020) — the owner chose a fresh start on the VM over migrating the Mac's existing data.
+  Nothing reconciles them; the Mac instance is stopped, not deleted, in case its history matters
+  later.
+- **No dashboard routing library** (e.g. React Router) — Epic F's two views (transactions,
+  needs-review) are switched with plain `useState` in `App.tsx`. Fine for two views; revisit if
+  Epic G's analytics views make this feel cramped.
+- No manual "add a transaction with no email" escape hatch yet (COR-5, H2) — an unmatched email a
+  user can't otherwise resolve just sits ignorable in the needs-review queue (F4's new "Ignore"
+  action), with no way to manually record the real transaction it might represent.
 - Encryption at rest is **field-level, not whole-database** (ADR-0015) — transaction data
   itself relies on OS-level disk encryption if the user wants that layer protected too; this is
   a real, accepted limitation, not an oversight (see REQUIREMENTS.md §4 NFR Security).

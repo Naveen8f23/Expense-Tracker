@@ -588,3 +588,119 @@ Copy this block for each new decision:
   wraps these libraries behind its own interface, so nothing above it depends on Google's
   libraries directly — consistent with the plug-and-play module boundary (REQUIREMENTS.md §9)
   that would let a second ingestion source be added later without touching this seam.
+
+### ADR-0019: Automatic background sync via an in-process thread; real Gmail push considered and rejected for now
+
+- **Date:** 2026-07-19
+- **Status:** Accepted
+- **Decision:**
+  1. `SyncScheduler` (`app/infrastructure/sync_scheduler.py`) runs the existing incremental-sync
+     + classify/extract pipeline on a plain `threading.Thread`, polling every 5 seconds by default
+     (`SYNC_POLL_INTERVAL_SECONDS`), started/stopped from FastAPI's lifespan hook. No manual
+     "sync now" action exists or is needed.
+  2. The dashboard polls `GET /transactions/recent?since_id=` (new) every 5 seconds and shows a
+     real browser `Notification` for each newly-arrived transaction, clickable straight to that
+     transaction's correction form.
+  3. Real Gmail push notifications (the `users.watch()` API + Google Cloud Pub/Sub) were
+     considered and explicitly **not** adopted now, since they require a publicly reachable
+     HTTPS endpoint for Google to push to — in direct tension with ADR-0002's local-first
+     deployment model, which that ADR already flagged as the reason polling was chosen over push
+     in the first place.
+- **Context:** The owner asked for new transactions to appear automatically ("no sync button"),
+  initially requesting a 1-second poll interval, imagining something like a push notification
+  they could click to categorize. REQUIREMENTS.md §7 Assumption 8 already states sub-minute
+  real-time detection isn't required. Both points were surfaced directly to the owner before
+  building anything (Constitution principle 14/20): the 1-second interval traded real cost
+  (continuous polling) for no perceptible benefit (the bank's own email delivery lag dominates
+  actual latency, not poll granularity — Gmail's per-user rate limit, 250 quota units/second,
+  isn't actually at risk even at 1s), and true push would mean widening the local-first security
+  posture ADR-0002 deliberately narrowed.
+- **Alternatives considered:**
+  - **1-second polling, as literally first requested** — technically feasible on quota, but
+    wasteful for no perceptible gain over 5 seconds; rejected after presenting this tradeoff, in
+    favor of 5 seconds.
+  - **Gmail Watch API + Cloud Pub/Sub (true push)** — the closest thing to what the owner was
+    picturing (an OS-level push notification), and would work even with the dashboard tab closed.
+    Rejected for now: requires exposing an HTTPS endpoint to the internet (e.g. via ngrok or a
+    cloud relay), which is a real, deliberate change to the local-first posture ADR-0002 chose
+    specifically to protect this project's most sensitive data (a complete financial history) —
+    not something to fall into as a side effect of a polling-interval request. Revisit as its own
+    decision if the owner wants notifications with the tab closed badly enough to accept that
+    tradeoff.
+  - **A frontend-only poll with no backend scheduler** (dashboard triggers sync on each of its
+    own polls) — rejected: ties sync activity to whether a browser tab happens to be open, which
+    contradicts "no sync button, just always up to date," and duplicates logic the backend
+    should own once, not per-client.
+- **Reasoning:** A plain in-process thread matches ADR-0013's already-approved "simple in-process
+  timer... no external job queue" — no new dependency. Keeping the poll interval well below any
+  real Gmail quota ceiling but well above the bank's own delivery latency floor gives a
+  "feels-instant" experience without the cost (API load, continuous local CPU/network activity)
+  of polling faster than that latency floor allows any human-perceptible benefit.
+- **Consequences:** `email_messages`/`transactions` can now change underneath an open dashboard
+  tab without any user action — E1's `list_transactions` and the new `get_transactions_since`
+  must both stay correct under this concurrent-write pattern (two threads, one SQLite file); the
+  existing `check_same_thread=False` + sqlite3's default 5s busy-timeout already covers the rare
+  overlap case. Browser notifications only fire while a dashboard tab is open and the user has
+  granted permission — there is no notification path for a closed tab or when no browser is
+  running, since that would require the public-endpoint push approach explicitly deferred above.
+
+### ADR-0020: Ubuntu VM becomes the persistent, real deployment; single-process/single-port serving via a systemd user service
+
+- **Date:** 2026-07-19
+- **Status:** Accepted
+- **Decision:**
+  1. The Ubuntu VM (previously only ADR-0017's cross-platform *test* target) is now also where
+     the owner actually runs the app day to day. It got its own, independent Gmail connection and
+     backfill (a deliberate fresh start, not a migration of the Mac's existing local database —
+     the owner's choice when asked; see BACKLOG.md H4/this ADR's Consequences).
+  2. The backend now optionally serves the frontend's production build
+     (`frontend/dist`, `npm run build`) as static files at `/`, mounted after all API routes
+     (`app/presentation/main.py`). One process, one port — no separate Vite process, no CORS
+     needed for that origin. Only mounts if the build exists, so `npm run dev` (a different
+     origin, already covered by the existing CORS middleware) and the test suite (which never
+     builds the frontend) are both unaffected.
+  3. `frontend/.env.production` sets `VITE_API_BASE_URL=` (empty/relative), instead of the dev
+     default's hardcoded `http://localhost:8000` — the production bundle must work regardless of
+     which local port a future SSH tunnel happens to use, since it's now same-origin with the
+     backend that serves it.
+  4. The VM runs this as a persistent `systemd --user` service (`deploy/expense-tracker.service`,
+     installed per `deploy/README.md`), not the ephemeral `scripts/vm_dev.py` dev-mode servers —
+     auto-restarts on failure, and (after a one-time `sudo loginctl enable-linger`, run by the
+     owner directly, never through an agent) survives the owner's SSH session ending and VM
+     reboots. `scripts/deploy_vm.py` automates future updates: sync, backend deps, migrations,
+     frontend rebuild, `systemctl --user restart` — no sudo needed for any of that.
+- **Context:** The owner asked to actually live-test everything built so far by running it on the
+  VM, then decided the VM should become the real, permanent instance rather than a test-only
+  target, having confirmed H4's automatic sync worked as intended. Two things surfaced live while
+  making this real: (a) `systemctl --user` services stop the moment the user's last session ends,
+  discovered directly when the service kept dying every ~10s in step with SSH connect/disconnect,
+  before lingering was enabled; (b) the dashboard, unmodified, was still pointed at
+  `http://localhost:8000` even when served by the same process that would host it at a different
+  port via a future tunnel — worth fixing rather than leaving as a footgun for the next redeploy.
+- **Alternatives considered:**
+  - **Keep two separate dev-mode processes (`vite dev` + `uvicorn --reload`), just leave them
+    running** — rejected: `--reload` mode's multiprocessing workers were *already* twice observed
+    this session to survive their parent's shutdown as orphaned processes silently squatting on a
+    port (see BACKLOG.md Epic F's note) — the wrong foundation for something meant to run
+    unattended for weeks. A production ASGI server without `--reload`, run as a real service, does
+    not have this failure mode.
+  - **A system-wide (root) systemd service instead of `--user`** — rejected: would need sudo for
+    every future install/restart, not just the one-time linger setup; explicitly avoided per the
+    "never ask for/handle the user's password" constraint that shaped this whole deployment
+    approach.
+  - **Migrate the Mac's existing local database to the VM** — offered as the recommended option
+    (preserves history, no re-consent needed); the owner chose a fresh start instead. Documented
+    so a future session doesn't assume continuity that was explicitly declined.
+- **Reasoning:** Single process/single port is simpler to reason about, deploy, and tunnel to than
+  two coordinated processes, and matches BACKLOG.md H3's original anticipation ("once the frontend
+  is built for real use, not just `npm run dev`"). `systemd --user` + lingering gives real
+  production reliability (auto-restart, survives reboot) without ever requiring an agent to handle
+  a sudo password beyond the single one-time step the owner ran themselves.
+- **Consequences:** The Mac's local database and the VM's database are now two independent,
+  diverging transaction histories — nothing reconciles them, and nothing is planned to. The Mac
+  instance was stopped (not deleted) as the owner's real day-to-day instance; the VM is now that.
+  Future schema migrations must be applied via `scripts/deploy_vm.py` (which now runs
+  `alembic upgrade head` as part of every deploy) rather than a separate manual step. The
+  `gmail_client_secret.json` OAuth credential file was copied directly between the owner's own two
+  machines (scp, permissions locked to `600` on arrival) — never viewed or transmitted through any
+  agent-authored tool output, consistent with never handling credentials in plain text.
