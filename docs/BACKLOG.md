@@ -6,11 +6,12 @@ Status: **v1.0 — Epics A-F (Foundation through Dashboard: Review & Correction)
 (ADR-0020) — running as a persistent `systemd --user` service with its own independent
 (freshly-connected, not migrated) Gmail history; the local Mac instance has been stopped.
 Epic G (Search & Analytics, MVP complete) is done, verified (144/144 backend tests passing on
-macOS and the Ubuntu VM), demoed live on the production VM, and confirmed by the owner
-(2026-07-19) — this completes REQUIREMENTS.md §13's MVP definition (modulo the still-pending 4th
-email template). Two same-day follow-ups the owner requested during/after the demo are included
-in the same change: showing (real-or-approximate) transaction time next to the date everywhere,
-and fixing same-day sort order to actually follow that time instead of database insertion order.**
+macOS and the Ubuntu VM), demoed live on the production VM, confirmed by the owner, and merged to
+main (2026-07-19; PR #7) — this completes REQUIREMENTS.md §13's MVP definition (modulo the
+still-pending 4th email template). Two same-day follow-ups the owner requested during/after the
+demo are included in the same change: showing (real-or-approximate) transaction time next to the
+date everywhere, and fixing same-day sort order to actually follow that time instead of database
+insertion order.**
 
 This is the detailed, implementation-level breakdown of [ROADMAP.md](ROADMAP.md) milestones
 M2–M5, into units small enough to pick up and build one at a time. ROADMAP.md stays
