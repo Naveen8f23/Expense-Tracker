@@ -173,7 +173,12 @@ def get_payee_history(
     # for why this can't be a single SQL ORDER BY.
     all_matching = base.options(joinedload(Transaction.email_message)).all()
     all_matching.sort(
-        key=lambda t: effective_sort_datetime(t.txn_date, t.txn_time, t.email_message.received_at),
+        key=lambda t: effective_sort_datetime(
+            t.txn_date,
+            t.txn_time,
+            t.email_message.received_at if t.email_message else None,
+            t.created_at,
+        ),
         reverse=True,
     )
     items = all_matching[offset : offset + limit]

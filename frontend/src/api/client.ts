@@ -60,8 +60,10 @@ export interface Transaction {
   txn_date: string;
   txn_time: string | null;
   // Not every source template provides a time (the UPI templates are date-only) -- when
-  // txn_time is null, this is the fallback used for an approximate display time.
-  email_received_at: string;
+  // txn_time is null, this is the fallback used for an approximate display time. Null for a
+  // manually-added transaction (H2, COR-5), which has no source email at all -- falls back to
+  // created_at instead (see frontend/src/utils/transactionTime.tsx).
+  email_received_at: string | null;
   payee: Payee;
   instrument_last4: string | null;
   category_id: number | null;
@@ -71,7 +73,9 @@ export interface Transaction {
   reference_number: string | null;
   confidence_score: number;
   review_status: ReviewStatus;
-  email_message_id: number;
+  // Null for a manually-added transaction (H2, COR-5) -- this IS the "manually added" marker,
+  // no separate flag.
+  email_message_id: number | null;
   dismissed: boolean;
   created_at: string;
 }
@@ -86,7 +90,7 @@ export interface EmailMessage {
 }
 
 export interface TransactionWithSourceEmail extends Transaction {
-  source_email: EmailMessage;
+  source_email: EmailMessage | null;
 }
 
 export interface Category {
@@ -122,6 +126,15 @@ export interface TransactionCorrection {
   category_id?: number;
   payment_method?: PaymentMethod;
   txn_type?: TransactionType;
+}
+
+export interface ManualTransactionInput {
+  amount: string;
+  txn_date: string;
+  payee_name: string;
+  payment_method: PaymentMethod;
+  txn_type: TransactionType;
+  category_id?: number;
 }
 
 export interface NeedsReviewQueue {
@@ -175,6 +188,12 @@ export async function correctTransaction(
 
 export async function dismissTransaction(id: number): Promise<Transaction> {
   return request(`/transactions/${id}/dismiss`, { method: "POST" });
+}
+
+export async function createManualTransaction(
+  input: ManualTransactionInput,
+): Promise<Transaction> {
+  return request(`/transactions`, { method: "POST", body: JSON.stringify(input) });
 }
 
 export async function getNeedsReview(): Promise<NeedsReviewQueue> {

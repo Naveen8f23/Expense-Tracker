@@ -337,3 +337,88 @@ class TestSortByEffectiveTime:
         assert response.status_code == 200
         ids_in_order = [item["id"] for item in response.json()["items"]]
         assert ids_in_order == [late_id, mid_id, early_id]
+
+
+class TestAddManualTransaction:
+    def test_creates_a_transaction_with_no_source_email(self, client):
+        test_client, _ = client
+
+        response = test_client.post(
+            "/transactions",
+            json={
+                "amount": "45.00",
+                "txn_date": "2026-07-19",
+                "payee_name": "Corner Store",
+                "payment_method": "upi",
+                "txn_type": "debit",
+            },
+        )
+
+        assert response.status_code == 201
+        body = response.json()
+        assert body["amount"] == "45.00"
+        assert body["email_message_id"] is None
+        assert body["email_received_at"] is None
+        assert body["review_status"] == "user_confirmed"
+
+        get_response = test_client.get(f"/transactions/{body['id']}")
+        assert get_response.json()["source_email"] is None
+
+    def test_reuses_an_existing_payee_by_case_insensitive_name(self, client):
+        test_client, session_factory = client
+        session = session_factory()
+        user = ensure_default_user(session)
+        existing = _make_transaction(session, user, payee_name="GOLKONDAS CAFE", payee_identifier="a@x")
+        existing_payee_id = existing.payee_id
+        session.close()
+
+        response = test_client.post(
+            "/transactions",
+            json={
+                "amount": "10.00",
+                "txn_date": "2026-07-19",
+                "payee_name": "golkondas cafe",
+                "payment_method": "upi",
+                "txn_type": "debit",
+            },
+        )
+
+        assert response.status_code == 201
+        assert response.json()["payee"]["id"] == existing_payee_id
+
+    def test_assigning_a_category_remembers_it_as_the_payees_default(self, client):
+        test_client, session_factory = client
+        session = session_factory()
+        user = ensure_default_user(session)
+        category = Category(user_id=user.id, name="Groceries")
+        session.add(category)
+        session.commit()
+        category_id = category.id
+        session.close()
+
+        first = test_client.post(
+            "/transactions",
+            json={
+                "amount": "20.00",
+                "txn_date": "2026-07-19",
+                "payee_name": "Corner Store 2",
+                "payment_method": "upi",
+                "txn_type": "debit",
+                "category_id": category_id,
+            },
+        )
+        assert first.json()["category_id"] == category_id
+
+        # A second manual entry for the same payee, with no category given, should inherit it
+        # (COR-2, same behavior as an auto-ingested transaction from an already-categorized payee).
+        second = test_client.post(
+            "/transactions",
+            json={
+                "amount": "30.00",
+                "txn_date": "2026-07-19",
+                "payee_name": "Corner Store 2",
+                "payment_method": "upi",
+                "txn_type": "debit",
+            },
+        )
+        assert second.json()["category_id"] == category_id

@@ -12,6 +12,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.application.add_manual_transaction import (
+    ManualTransactionInput,
+    add_manual_transaction,
+)
 from app.application.correct_transaction import TransactionCorrection, correct_transaction
 from app.application.dismiss_transaction import dismiss_transaction
 from app.application.list_transactions import (
@@ -35,6 +39,15 @@ class TransactionCorrectionRequest(BaseModel):
     category_id: Optional[int] = None
     payment_method: Optional[PaymentMethod] = None
     txn_type: Optional[DebitOrCredit] = None
+
+
+class ManualTransactionRequest(BaseModel):
+    amount: Decimal
+    txn_date: date
+    payee_name: str
+    payment_method: PaymentMethod
+    txn_type: DebitOrCredit
+    category_id: Optional[int] = None
 
 
 @router.get("")
@@ -73,6 +86,28 @@ def list_transactions_endpoint(
     }
 
 
+@router.post("", status_code=201)
+def add_manual_transaction_endpoint(
+    body: ManualTransactionRequest, session: Session = Depends(get_db)
+) -> dict:
+    """H2, COR-5: an escape hatch for the rare transaction with no corresponding email (e.g.
+    cash) -- expected to stay rare, not become the norm."""
+    user = ensure_default_user(session)
+    txn = add_manual_transaction(
+        session,
+        user,
+        ManualTransactionInput(
+            amount=body.amount,
+            txn_date=body.txn_date,
+            payee_name=body.payee_name,
+            payment_method=body.payment_method,
+            txn_type=body.txn_type,
+            category_id=body.category_id,
+        ),
+    )
+    return serialize_transaction(txn)
+
+
 @router.get("/recent")
 def get_recent_transactions_endpoint(
     since_id: int = Query(default=0, ge=0), session: Session = Depends(get_db)
@@ -92,7 +127,7 @@ def get_transaction_endpoint(transaction_id: int, session: Session = Depends(get
     if txn is None or txn.user_id != user.id:
         raise HTTPException(status_code=404, detail="Transaction not found")
     data = serialize_transaction(txn)
-    data["source_email"] = serialize_email_message(txn.email_message)
+    data["source_email"] = serialize_email_message(txn.email_message) if txn.email_message else None
     return data
 
 
