@@ -1,20 +1,27 @@
 # Backlog
 
-Status: **v1.0 — All eight epics (A-H) are done, verified, and merged to main (2026-07-19;
-PR #1-#8).** This is every story originally planned in this file — see "Epic Overview" below and
-each epic's own status block for what was built and how it was verified. Foundation through
-Dashboard (A-F), packaging (H3), and automatic sync (H4) merged first (PR #1-#6); Search &
-Analytics (G) — which completes REQUIREMENTS.md §13's MVP definition — merged next (PR #7),
-along with two same-day follow-ups (transaction time display, time-based sort order); Epic H's
-remaining stories (H1, already satisfied by an Epic A test; H2, the manual add-transaction escape
-hatch, ADR-0022) merged last (PR #8). The Ubuntu VM is the owner's actual, permanent, day-to-day
-instance (ADR-0020) — a persistent `systemd --user` service with its own independent Gmail
-history; the local Mac instance has been stopped. The only requirement not yet fully met is the
-still-pending 4th email template (credit card credit, REQUIREMENTS.md §8), which was never tied
-to any specific epic — see [ROADMAP.md](ROADMAP.md) for what's next post-MVP.**
+Status: **v1.0 (web MVP) done; v1.1 (Ledger, the iOS app) planning started 2026-07-19.** All
+eight original epics (A-H) are done, verified, and merged to main (2026-07-19; PR #1-#8) — see
+"Epic Overview" below and each epic's own status block for what was built and how it was
+verified. Foundation through Dashboard (A-F), packaging (H3), and automatic sync (H4) merged
+first (PR #1-#6); Search & Analytics (G) — which completes REQUIREMENTS.md §13's MVP definition —
+merged next (PR #7), along with two same-day follow-ups (transaction time display, time-based
+sort order); Epic H's remaining stories (H1, already satisfied by an Epic A test; H2, the manual
+add-transaction escape hatch, ADR-0022) merged last (PR #8). The Ubuntu VM is the owner's actual,
+permanent, day-to-day instance (ADR-0020) — a persistent `systemd --user` service with its own
+independent Gmail history; the local Mac instance has been stopped. The only web-MVP requirement
+not yet fully met is the still-pending 4th email template (credit card credit, REQUIREMENTS.md
+§8), which was never tied to any specific epic.
+
+**Epics I–M below are new (2026-07-19): the story breakdown for Ledger, ROADMAP.md M7's iOS app.**
+A visual design concept was reviewed and confirmed by the owner first (not tracked as a story
+here — it was a standalone design pass, not a build step); Swift + SwiftUI and an
+in-app/foreground-only notification scope were then decided (ADR-0023, ADR-0024) before any of
+the epics below were written, per Constitution principle 20 (tradeoffs presented and agreed
+before implementation, not guessed).
 
 This is the detailed, implementation-level breakdown of [ROADMAP.md](ROADMAP.md) milestones
-M2–M5, into units small enough to pick up and build one at a time. ROADMAP.md stays
+M2–M5 and now M7, into units small enough to pick up and build one at a time. ROADMAP.md stays
 milestones-only by design; this file is where day-to-day story tracking lives instead.
 
 Each story is scoped to one module boundary from [ARCHITECTURE.md](ARCHITECTURE.md) §3, so it
@@ -82,6 +89,11 @@ just an internal milestone.
 | F | Dashboard — Review & Correction | REQUIREMENTS.md §3.4–3.5, ROADMAP.md M4 | E |
 | G | Search & Analytics (MVP complete) | REQUIREMENTS.md §3.6–3.7, ROADMAP.md M5 | E, F |
 | H | Cross-cutting polish | NFRs (REQUIREMENTS.md §4) | rolling, alongside others |
+| I | Ledger — iOS Foundation | REQUIREMENTS.md §15, ROADMAP.md M7 | E (backend API only; no other web epic) |
+| J | Ledger — Transaction List & Correction | REQUIREMENTS.md §15 (MOB-2), ROADMAP.md M7 | I |
+| K | Ledger — Needs-Review Queue | REQUIREMENTS.md §15 (MOB-2), ROADMAP.md M7 | I, J |
+| L | Ledger — Analytics | REQUIREMENTS.md §15 (MOB-2), ROADMAP.md M7 | I, J |
+| M | Ledger — Manual Add & Notifications | REQUIREMENTS.md §15 (MOB-4, MOB-6), ROADMAP.md M7 | J |
 
 ---
 
@@ -973,6 +985,459 @@ new code); H3/H4 were built the same day as Epic F; H2 (this session) required a
 intentional schema change (`transactions.email_message_id` now nullable, ADR-0022) to represent
 "no source email" honestly rather than working around it. 148/148 backend tests passing (4 new)
 on macOS and the Ubuntu VM; dashboard verified live via the Browser tool.
+
+---
+
+## Epic I — Ledger: iOS Foundation (ROADMAP.md M7)
+
+**Status: All three stories (I1-I3) code-complete (2026-07-19); epic checkpoint not yet done.**
+Every story below is presentation-only (Constitution principle 5) — no backend endpoint is added,
+changed, or removed by this epic. Native Swift + SwiftUI per ADR-0023. I1 confirmed running on the
+owner's own iPhone; I2 and I3 verified via `xcodebuild test` (17/17) and the simulator only — I3's
+settings sheet still needs a live check on the owner's phone against the real VM before the
+epic-checkpoint demo (ADR-0014's policy: demo + explicit go-ahead before Epic J starts).
+
+### I1. Xcode project scaffold ✅
+**As** the developer, **I want** a SwiftUI app target laid out with the same dependency
+discipline as the rest of this codebase (a layer that renders UI must not itself make network
+calls; a layer that makes network calls must not import SwiftUI), **so that** Ledger has an
+obvious, consistent place for later stories to live, mirroring ARCHITECTURE.md §3's existing rule
+for the backend and the frontend.
+
+**Acceptance criteria:**
+- A three-tab `TabView` shell (Ledger / Analytics / Review) builds and runs on the owner's own
+  iPhone via Xcode, matching the tab icons/labels from the confirmed design concept. ✅ Confirmed
+  building and running on the owner's real iPhone via free Xcode signing (following the trust/
+  developer-mode prompts once). Tab icons (`list.bullet.rectangle` / `chart.pie` / `checklist`)
+  are placeholders, not yet checked against the original confirmed design mockup's exact choices —
+  revisit if/when that Artifact is available again; not a blocker for I2/I3.
+- Folder structure has clearly separate places for views, view-state, and networking — a
+  README note (or code comment) states the dependency direction, same spirit as A1's backend note.
+  ✅ `ios/Ledger/Ledger/{App,Views,ViewState,Networking}` + `ios/Ledger/README.md` states the rule
+  (Views may not call networking directly; Networking may not import SwiftUI).
+- No business logic yet, no network calls yet — skeleton only. ✅ Each tab is a placeholder
+  `Text` view.
+- Installed via free Xcode signing (personal-team), not TestFlight — the accepted distribution
+  path per ADR-0024. The provisioning profile's ~7-day expiry (requiring a reconnect-and-rebuild)
+  is a known, accepted cost of this path, not a bug to chase. ✅ Confirmed working this way.
+
+**Implementation note:** the `.xcodeproj` is generated from a checked-in `ios/Ledger/project.yml`
+via [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`;
+`cd ios/Ledger && xcodegen generate`) rather than hand-edited — keeps the project definition
+diffable in git. The generated `.xcodeproj`/`DerivedData`/`xcuserdata` are gitignored, same
+reasoning as not committing `node_modules`. Verified: `xcodebuild ... -sdk iphonesimulator build`
+succeeds and the shell installs/launches correctly in the simulator (screenshot-checked) before
+the owner separately confirmed it on their own physical iPhone.
+
+**Depends on:** none. **Size:** S.
+
+### I2. Backend API client module ✅
+**As** the developer, **I want** a single networking module wrapping every backend endpoint
+Ledger will call, **so that** no view ever talks to `URLSession` directly — the same rule
+`frontend/src/api/client.ts` already follows for the web dashboard.
+
+**Acceptance criteria:**
+- Codable Swift structs modeling the JSON shape of every endpoint below; one function per
+  endpoint, no speculative methods for endpoints that don't exist:
+  `GET /transactions`, `GET /transactions/{id}`, `PATCH /transactions/{id}`,
+  `POST /transactions/{id}/dismiss`, `POST /transactions` (H2 manual add),
+  `GET /transactions/recent?since_id=`, `GET /needs-review`,
+  `POST /needs-review/emails/{id}/ignore`, `GET`/`POST`/`PATCH`/`DELETE /categories`,
+  `GET /sync/status`, `GET /analytics/monthly`, `GET /analytics/by-category`,
+  `GET /analytics/by-payee/{payee}`. ✅ `ios/Ledger/Ledger/Networking/{Models,Requests,APIClient,
+  APIError,URLSessionProtocol}.swift`. Also added `GET /health` (I3 explicitly needs it for its
+  reachability check, and it's a real, already-built endpoint — not speculative). Every field name
+  was read directly from `backend/app/presentation/serializers.py` and each router/application-
+  layer file, not guessed from REQUIREMENTS.md's prose — e.g. money fields are `String` (the
+  backend serializes `Decimal` as `str(Decimal)`, not a JSON number), `txn_time`/`category_id`/
+  `category_name` are nullable, and `sync/status`'s `last_sync_*` fields are **absent entirely**
+  (not `null`) until the first sync has run.
+- Unit-testable against recorded fixtures/a local stub server, without a real backend running. ✅
+  A `URLSessionProtocol` seam lets tests inject a `StubURLSession` returning canned JSON — no
+  network, no real backend. 11 tests in `ios/Ledger/LedgerTests/APIClientTests.swift`, covering:
+  list/single-object decoding (including `source_email` only appearing on the single-GET), that
+  `PATCH`'s correction request omits unset fields entirely rather than sending `null` (the backend
+  treats an omitted field as "leave unchanged"), all three `sync/status` response shapes, both
+  distinct error-body shapes (`DELETE /categories/{id}`'s plain-string 404 vs. its nested-object
+  409), an unreachable-host failure, and that a payee name with a space is percent-encoded exactly
+  once (not double-encoded). All 11 pass via `xcodebuild test`.
+- Errors (unreachable host, non-2xx response, decode failure) surface as a typed result the
+  caller must handle explicitly — never a silently-swallowed failure (Constitution principle 21).
+  ✅ `APIError` (`.unreachable`, `.httpError(status:detail:)`, `.categoryInUse(message:
+  transactionCount:)`, `.decodingFailed`) — every `APIClient` function is `async throws`, nothing
+  is swallowed.
+
+**Depends on:** I1. **Size:** M.
+
+### I3. Backend reachability & connection settings ✅
+**As** the owner-operator, **I want** to tell Ledger where the backend lives and see plainly
+whether it's reachable, **so that** the app never hangs pretending to be live when it isn't
+(REQUIREMENTS.md MOB-5).
+
+**Acceptance criteria:**
+- A settings screen where the VM's Tailscale hostname/port is entered once and remembered locally
+  (plain local storage — not sensitive enough to need Keychain, unlike a real credential). ✅
+  `ViewState/ConnectionSettingsStore.swift` (`UserDefaults`-backed) +
+  `Views/ConnectionSettingsView.swift`. No dedicated Settings tab exists in the confirmed 3-tab
+  design, so it's reached via a gear button in the Ledger tab's toolbar — the same
+  one-tap-deeper pattern Epic M uses for manual-add.
+- A reachability check (calls `GET /sync/status` or `GET /health`) shown as a clear status row —
+  a wrong host or an unreachable VM shows an explicit error, not an infinite spinner. ✅ Calls
+  `GET /health` first, then `GET /sync/status` (a 404 there just means "no Gmail account
+  connected yet," still reported as reachable, not an error). `APIClient.perform` now sets an
+  explicit 8-second request timeout (down from `URLRequest`'s ~60s default) specifically so a
+  wrong host fails fast into a visible "Unreachable" state instead of a long, spinner-like wait.
+  `ConnectionSettingsStore` takes an injectable client factory (mirroring I2's `URLSessionProtocol`
+  seam) so its reachability logic is unit-tested against a stub, not just eyeballed — 6 tests in
+  `LedgerTests/ConnectionSettingsStoreTests.swift` (persistence round-trip, healthy+synced,
+  healthy+no-Gmail-yet, unreachable, and "no host configured yet never touches the network").
+- Assumes the Tailscale iOS app is already installed with **VPN On Demand set to "Always" for
+  Wi-Fi and Cellular (ADR-0025)** — a one-time manual prerequisite performed by the owner, not
+  automatable by Ledger (same category as the Gmail OAuth consent click, BACKLOG.md B1). Ledger
+  itself needs no code to support this — it's a device setting, not an API or client behavior.
+
+**Implementation note:** the backend has no TLS certificate (it's only ever reached over the
+private tailnet), and its hostname is entered by the owner at runtime rather than known at build
+time, so a scoped App Transport Security exception isn't possible — `Info.plist` sets
+`NSAllowsArbitraryLoads`, documented in `project.yml` with the reasoning (personal app, free
+Xcode signing only, never App-Store distributed, so ATS review doesn't apply).
+
+**Verified:** `xcodebuild test` — 17/17 tests pass (11 from I2 + 6 new). Build succeeds and
+installs/launches on the simulator with the gear button visible (screenshot-checked). **The owner
+subsequently ran it live on their own iPhone** (per the Definition of Done's dashboard-story
+standard) — entering the VM's real hostname correctly produced "Unreachable — the request timed
+out," which is exactly the clear, non-hanging error state I3 asked for. That real attempt is what
+surfaced a genuine infrastructure problem (see the note below and J1's infrastructure note) — the
+VM itself turned out to be unreachable for reasons entirely outside Ledger's code. I3's own
+behavior — reachability check, save-and-remember, explicit error state — is confirmed correct;
+what's still open is the backend actually being reachable at a real address, tracked as
+infrastructure work, not an I3 defect.
+
+**Depends on:** I1. **Size:** S.
+
+---
+
+## Epic J — Ledger: Transaction List & Correction (mirrors F1–F3, F5)
+
+**Status: J1-J4 done; J5-J7 not started.**
+
+### J1. Transaction list (Ledger tab) ✅
+**As** the owner-operator, **I want** my transaction history on my phone in the same
+searchable/filterable shape as the web dashboard, **so that** I can browse spending without
+opening a laptop (SRCH-1).
+
+**Acceptance criteria:**
+- Calls `GET /transactions` with the same filters F1 exposes on the web (payee, category, date
+  range, amount range, method, type, free-text), rendered as the chip-based filter bar from the
+  confirmed design. ✅ `ViewState/TransactionListStore.swift` + `Views/LedgerListView.swift` +
+  `Views/TransactionFilterSheet.swift`. All 7 filters are wired and functional (category picker,
+  method/type segmented controls, date range, amount range, free-text search field). **Not yet
+  the chip-based filter bar from the confirmed design** — plain functional controls for now, same
+  placeholder-pending-mockup approach as I1's tab icons; J2 is explicitly where the debounced-
+  search/removable-chip polish belongs, mirroring G1.
+- Paginates via `limit`/`offset` as the list is scrolled. ✅ Via a "Load more" button (not
+  scroll-position auto-trigger — simpler and more reliably testable); `TransactionListStore`
+  tracks `hasMore` from the server's `total` vs. loaded count.
+- Dismissed transactions excluded by default (already true server-side, E1) — no client-side
+  re-filtering needed. ✅ No dismissed-filtering logic exists client-side at all.
+
+**Verified:** 4 new unit tests (`LedgerTests/TransactionListStoreTests.swift`, 21/21 total passing)
+covering no-connection, successful load + categories-fetched-once, pagination/`hasMore`, and a
+server-error path. Also verified live against the real local backend (running on the developer's
+Mac during this session while the VM's networking is blocked — see below): screenshot-confirmed
+real transactions rendering correctly, including the "Manual" badge (H2) and debit/credit amount
+coloring, both an error state (no connection configured) and a populated list.
+
+**Infrastructure note (2026-07-19, unrelated to J1's own code):** the Ubuntu VM (ADR-0020) turned
+out to have never actually joined Tailscale — REQUIREMENTS.md MOB-5 assumed it had, but it doesn't
+appear anywhere in `dpkg`, has no `tailscaled` process, and isn't reachable at its supposed
+Tailscale address even from the VM itself. Separately, `deploy/expense-tracker.service` was fixed
+to bind `0.0.0.0` instead of `127.0.0.1` (needed regardless, since the old bind made the backend
+unreachable from anywhere but itself) — both the repo file and the live VM unit were updated and
+the service restarted. The VM is actually reached today through the owner's brother's NAS acting
+as a Tailscale subnet router (a different setup than ADR-0002/0020 assumed), which currently only
+allows SSH through its firewall to that subnet — the brother is opening ports 6000-6500 for this.
+**Until that's confirmed open, Ledger development is proceeding against the backend running
+directly on the developer's own Mac** — reachable both via its real Tailscale hostname
+(`naveen-zoho-macbook`) and, for the Simulator, `http://localhost:8000` — not the VM. Full writeup
+in **DECISIONS.md ADR-0026** (interim state, not yet resolved). Once the VM's ports are open: the
+backend's production port likely needs to move into the newly-opened 6000-6500 range instead of
+8000 (update `deploy/expense-tracker.service` + the live VM unit), REQUIREMENTS.md MOB-5 needs
+revising to describe the actual subnet-router topology instead of the originally-assumed one, and
+ADR-0026 itself should be updated to close out the interim state.
+
+**Depends on:** I2. **Size:** M.
+
+### J2. Search & filter chips ✅
+**As** the owner-operator, **I want** filtering to feel fast, **so that** finding a transaction
+on my phone is as quick as on the web (mirrors G1).
+
+**Acceptance criteria:**
+- Free-text and payee-contains inputs are debounced (~400ms) before triggering a request — doubly
+  important over a Tailscale connection, which is slower than localhost. ✅
+  `Views/LedgerListView.swift` — a cancel-and-reschedule `Task` (400ms sleep) fires on
+  `onChange` of both the free-text search field and a new "Payee contains…" field.
+  **Fixes a J1 gap:** J1's acceptance criteria listed `payee` among F1's filters, but the filter
+  sheet built for J1 never actually exposed a payee input (only category/method/type/date/amount)
+  — this story is where it was added, matching the web's own F1→G1 split (payee existed before
+  G1; G1 just debounced it).
+- Active filters render as removable chips; a "Clear all" resets everything. ✅ New
+  `Views/FilterChip.swift`; a horizontally-scrolling chip row appears whenever any filter is
+  active (search, payee, category, method, type, date range, amount range), each independently
+  removable, plus a "Clear all" that resets everything (search text, payee text, and the sheet's
+  filters) in one action.
+
+**Verified:** live via the demo XCUITest harness (screenshots) — typing "Vendor" into the payee
+field correctly narrowed the list to matching transactions after the debounce window; combining a
+payee filter with a "Credit" type filter correctly produced "No transactions" (those entries are
+debits); "Clear all" correctly reset both text fields and the sheet's filters and repopulated the
+full list.
+
+**Depends on:** J1. **Size:** S.
+
+### J3. Transaction detail sheet ✅
+**As** the owner-operator, **I want** to open a transaction and correct any field, **so that** I
+can fix mistakes from my phone (COR-1).
+
+**Acceptance criteria:**
+- `GET`/`PATCH /transactions/{id}` — every E3-editable field has a control, presented as a sheet
+  (not a full-screen push), matching the confirmed design. ✅ New
+  `ViewState/TransactionDetailStore.swift` + `Views/TransactionDetailView.swift`. Every row in
+  `LedgerListView` is now tappable (wrapped in a `Button`, trailing chevron affordance) and opens
+  this sheet via `.sheet(item:)`. Amount, date, payee name, category, payment method, and
+  debit/credit all have controls; no time field, matching H2's own web precedent.
+- Category is assigned via a manual picker only — **no auto-suggested or pre-filled category**
+  (REQUIREMENTS.md MOB-3, reconfirmed by the owner this session); the only durability mechanic is
+  COR-2 (a category remembered per payee), identical to the web dashboard's own behavior. ✅
+  **Known limitation, documented in code:** picking "Uncategorized" on an already-categorized
+  transaction can't actually clear the category — the backend's PATCH endpoint has no way to
+  explicitly null a field, only leave it unchanged (ground truth from I2). The picker silently
+  no-ops in that case rather than corrupting data; the sheet dismisses immediately on save either
+  way, so this isn't currently user-visible as a mismatch.
+- A "Not a real expense" action calls `POST /transactions/{id}/dismiss` (COR-4). ✅ A destructive
+  button + confirmation dialog, disabled if already dismissed.
+
+**Verified:** 5 new unit tests (`LedgerTests/TransactionDetailStoreTests.swift`, 26/26 total
+passing) covering load, a partial PATCH (confirms unset fields are omitted, not nulled), dismiss,
+and a server-error path. **Also verified live** via the demo XCUITest harness against the real
+local backend, with the actual database checked via `curl` before/after each action (not just
+screenshots): editing a payee name persisted correctly (toggled "Local Vegetable Vendor" ↔
+"Corner Vegetable Stall" across two separate runs — proof this isn't a fluke), and dismissing a
+transaction ("SIRI SUPER MARKET") flipped its `dismissed` field to `true` on the server. One real
+bug found and fixed this way: `TransactionDetailView`'s content view had a genuine blank-screen gap
+— before `.task` starts, `transaction` is nil, `isLoading` is still false, and `errorMessage` is
+nil, so none of the three view branches matched and nothing rendered. Fixed by making the loading
+spinner the `else` catch-all instead of a separate `store.isLoading` condition.
+
+**Follow-up fix (2026-07-19, spotted by the owner): transaction rows were missing the time
+alongside the date** — the row only ever showed `txn_date`, never carrying over the web
+dashboard's own Epic G follow-up (real `txn_time` when the template captured one, else an
+approximate "~" time from the source email/manual-entry timestamp). New
+`Networking/TransactionDisplayTime.swift` mirrors `frontend/src/utils/transactionTime.tsx`'s exact
+fallback tiers. Building it surfaced a second real bug: the actual backend serializes
+`email_received_at`/`created_at` with **no timezone suffix at all** (confirmed directly against
+the running server — `"2026-07-19T10:40:39"`, not `"...+00:00"` as I2's original ground-truth
+research had assumed for this specific field), which `ISO8601DateFormatter` silently fails to
+parse — appending `"Z"` before parsing (matching the frontend's own handling of the same naive-UTC
+values) fixed it. 5 new unit tests plus a live screenshot against real data (confirmed times like
+`~9:33 AM` now render, not just bare dates).
+
+**Depends on:** J1, I2. **Size:** M.
+
+### J4. Source email viewer ✅
+**As** the owner-operator, **I want** to see the original email a transaction came from, **so
+that** I can verify the extraction from my phone (TRC-2), mirroring F3.
+
+**Acceptance criteria:**
+- Reachable as a disclosure from J3, showing the cached email content from `GET /transactions/{id}`.
+  ✅ New `Views/SourceEmailView.swift`, reached via a "View source email" row in
+  `TransactionDetailView` — shown only when `transaction.sourceEmail` is populated (real synced
+  transactions); manually-added transactions (H2, `email_message_id == nil`) still show the
+  existing "no source email" note instead, unchanged from J3.
+- Rendered as plain, escaped text only — **never interpreted as live/rendered HTML** by any
+  system text view or web view component. This is untrusted external content (a real bank email,
+  ADR-0006); the same stored-XSS-shaped risk F3 already guards against on the web applies here. ✅
+  **Simpler than the web's own version of this problem:** SwiftUI's `Text` never interprets its
+  string as markup in the first place — there's no `dangerouslySetInnerHTML`-equivalent risk to
+  avoid, as long as nothing reaches for `NSAttributedString(data:options:[.documentType: .html])`
+  or a `WKWebView` (a code comment flags this explicitly so a future edit doesn't accidentally
+  introduce one). Verified live via the demo XCUITest harness against a real synced transaction's
+  cached email — screenshot confirms raw markup (`<!doctype html>`, `<meta>` tags, etc.) renders
+  as literal visible text, not interpreted HTML.
+
+**Depends on:** J3. **Size:** S.
+
+### J5. Swipe actions (Edit / Dismiss)
+**As** the owner-operator, **I want** to act on a row without opening it, **so that** quick
+triage is quick, matching the confirmed design's swipe gesture.
+
+**Acceptance criteria:**
+- Native `swipeActions` on each list row: Edit opens J3's sheet; Dismiss calls
+  `POST /transactions/{id}/dismiss` directly.
+
+**Depends on:** J1, J3. **Size:** S.
+
+### J6. Category management + inline "+ New category"
+**As** the owner-operator, **I want** to create and assign categories directly from a transaction,
+**so that** categorizing stays a single action (mirrors F5/E6).
+
+**Acceptance criteria:**
+- Full CRUD via `GET`/`POST`/`PATCH`/`DELETE /categories`, including the reassign-on-delete flow
+  (a delete without `reassign_to` on an in-use category surfaces E6's 409 + affected count, not a
+  silent failure or an orphaned reference).
+- The category picker in J3 supports "+ New category…" inline, creating then assigning in one flow.
+
+**Depends on:** J3. **Size:** S.
+
+### J7. Sync-health indicator
+**As** the owner-operator, **I want** to see at a glance whether sync is healthy, **so that** I
+never wonder if Ledger (or the VM) is silently broken (ING-8), mirroring the confirmed design's
+nav-bar dot.
+
+**Acceptance criteria:**
+- A small colored dot (or equivalent) in the Ledger tab, calling `GET /sync/status`; tapping it
+  shows the same scanned/matched/skipped/failed counts the endpoint already returns.
+- Pull-to-refresh re-fetches the current transaction list/state. **Explicitly out of scope:**
+  there is no endpoint to trigger a new Gmail sync on demand — the VM's `SyncScheduler`
+  (ADR-0019) already runs independently every 5 seconds regardless of whether Ledger is open, so
+  pull-to-refresh is for reassurance and immediacy, not for making the VM check Gmail sooner.
+
+**Depends on:** J1. **Size:** S.
+
+---
+
+## Epic K — Ledger: Needs-Review Queue (mirrors F4)
+
+**Status: Not started.**
+
+### K1. Review tab
+**As** the owner-operator, **I want** a dedicated screen listing everything needing my attention,
+**so that** nothing gets missed from my phone (EXT-5, EXT-6).
+
+**Acceptance criteria:**
+- Calls `GET /needs-review`; displays both halves it already returns — unmatched emails and
+  low-confidence transactions — as separate sections with reason chips, matching the confirmed
+  design.
+
+**Depends on:** I2. **Size:** M.
+
+### K2. Swipe-to-ignore for unmatched emails
+**As** the owner-operator, **I want** to clear an unmatched email from the queue, **so that** I'm
+not stuck reviewing something I've already decided isn't a real transaction (mirrors F4's addendum).
+
+**Acceptance criteria:**
+- Calls `POST /needs-review/emails/{id}/ignore` via a swipe action.
+
+**Depends on:** K1. **Size:** S.
+
+### K3. Review a low-confidence transaction
+**As** the owner-operator, **I want** tapping a low-confidence item to open the same correction
+flow as any other transaction, **so that** there's only one correction UI to learn.
+
+**Acceptance criteria:**
+- Tapping a low-confidence item opens J3's detail sheet, not a separate review-specific form.
+
+**Depends on:** K1, J3. **Size:** S.
+
+### K4. Review tab badge count
+**As** the owner-operator, **I want** the Review tab to wear its queue size openly, **so that** I
+always know before tapping in whether anything's waiting (matches the confirmed design).
+
+**Acceptance criteria:**
+- The tab badge reflects the queue size as of the last time it was fetched (app foreground/tab
+  switch) — **not** a live/real-time count while another tab is open, since no push mechanism
+  exists to update it silently in the background (ADR-0024).
+
+**Depends on:** K1. **Size:** S.
+
+---
+
+## Epic L — Ledger: Analytics (mirrors G2–G4)
+
+**Status: Not started.**
+
+### L1. Analytics tab — monthly summary
+**As** the owner-operator, **I want** the monthly total on my phone, **so that** I can see my
+spending at a glance without opening a laptop (ANL-1, ANL-4).
+
+**Acceptance criteria:**
+- Calls `GET /analytics/monthly`; month switcher (Previous/Next) plus spent/received/net summary
+  cards, matching the confirmed design and ADR-0021's sign convention.
+
+**Depends on:** I2. **Size:** M.
+
+### L2. Category breakdown
+**As** the owner-operator, **I want** to see spend by category for the selected month, **so
+that** I understand where money goes, from my phone (ANL-2).
+
+**Acceptance criteria:**
+- Calls `GET /analytics/by-category`; ranked bars, debit-only, "Uncategorized" bucket included —
+  same conventions as the web dashboard (ADR-0021), no reinterpretation on the client.
+
+**Depends on:** L1. **Size:** S.
+
+### L3. Payee history
+**As** the owner-operator, **I want** to tap any payee name and see their running history and
+total, **so that** I can spot patterns per merchant/person (ANL-3).
+
+**Acceptance criteria:**
+- Tapping a payee name anywhere it appears (list rows, review queue) calls
+  `GET /analytics/by-payee/{payee}` and opens a panel with the total and a clickable transaction
+  list, matching the confirmed design's payee history view.
+
+**Depends on:** L1, J1. **Size:** S.
+
+---
+
+## Epic M — Ledger: Manual Add & In-App Notifications
+
+**Status: Not started.**
+
+### M1. Add Transaction sheet
+**As** the owner-operator, **I want** to add a transaction with no corresponding email from my
+phone, **so that** the rare cash purchase isn't lost (COR-5, REQUIREMENTS.md MOB-6), mirroring H2.
+
+**Acceptance criteria:**
+- Reached only via a small "+" in the Ledger tab's toolbar — **never its own tab** — keeping it a
+  deliberate exception, not a primary workflow, matching the confirmed design's stated reasoning.
+- Calls `POST /transactions`; category assigned manually via J6's picker, no auto-suggestion
+  (MOB-3); no time field, matching J3's own shape (H2's precedent).
+
+**Depends on:** J3, J6. **Size:** S.
+
+### M2. In-app new-transaction notifications (ADR-0024)
+**As** the owner-operator, **I want** to be told when a new transaction arrives while I'm using
+Ledger, **so that** categorizing it feels almost as immediate as a push notification, within the
+scope actually agreed (REQUIREMENTS.md MOB-4).
+
+**Acceptance criteria:**
+- While the app is foregrounded, or backgrounded within the short window iOS keeps a recently-
+  backgrounded app suspended-but-alive, poll `GET /transactions/recent?since_id=` on the same
+  ~5-second cadence as the web dashboard's H4 hook.
+- A new transaction fires a local `UNNotificationRequest` (banner + badge); tapping it opens
+  straight to that transaction's J3 detail sheet, via the notification's `userInfo` carrying the
+  transaction id — not just a generic app-open.
+- **Explicit non-goal, stated plainly and not to be silently "fixed" later without a fresh
+  decision:** nothing arrives once Ledger has been fully backgrounded for more than a few minutes,
+  or force-quit. This is ADR-0024's accepted scope, chosen after both a paid (APNs) and a free
+  third-party-relay path were presented and declined.
+
+**Depends on:** J1, J3. **Size:** M.
+
+### M3. Background App Refresh supplement (best-effort)
+**As** the owner-operator, **I want** Ledger to take advantage of whatever background time iOS
+is willing to grant it, **so that** the closed-app gap in M2 is at least partially, honestly
+narrowed rather than left completely dark.
+
+**Acceptance criteria:**
+- Registers a `BGAppRefreshTask`; when iOS grants it a run, checks `GET /transactions/recent`
+  once and fires a local notification if something new turned up.
+- **Explicitly documented as best-effort, not reliable** — iOS decides if/when this runs (based on
+  the owner's own usage patterns, battery state, etc.), often not more than a few times a day or
+  less. Must never be presented to the owner as a dependable channel, in the UI or in any future
+  doc referencing it (Constitution principle 21).
+
+**Depends on:** M2. **Size:** S.
 
 ---
 _Revision history: track major changes here in [CHANGELOG.md](CHANGELOG.md). Architectural
