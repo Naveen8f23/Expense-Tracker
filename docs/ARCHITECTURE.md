@@ -20,7 +20,11 @@ and same-day sort order now actually follows that time
 polish) done (2026-07-19)** — H1 (encryption verification) was already satisfied by an Epic A2
 test; H2 (manual "add a transaction" escape hatch, ADR-0022) required making
 `transactions.email_message_id` nullable, the first schema change to that table's core shape
-since Epic A. Detailed build backlog tracked in [BACKLOG.md](BACKLOG.md).
+since Epic A. **M7 (Ledger, the iOS app) started (2026-07-19)** — a visual design concept was
+reviewed and confirmed; Swift + SwiftUI chosen (ADR-0023); new-transaction notifications will be
+in-app/foreground-only, not Apple Push and not a third-party relay (ADR-0024). No backend changes
+are implied — Ledger is a second Presentation-layer client of the existing API (§3). Detailed
+build backlog tracked in [BACKLOG.md](BACKLOG.md) (Epics I–M for Ledger).
 
 This document describes the current state of the system's architecture. It should always
 reflect what *is*, not what's planned (that belongs in [ROADMAP.md](ROADMAP.md)) or why a
@@ -74,8 +78,10 @@ ADR-0002), with two halves that share one local database:
                                                               (search, correct, analytics)
 ```
 
-A future mobile app (ROADMAP.md M7) connects to the same API Layer as an additional client —
-it does not get its own copy of the sync pipeline.
+A mobile app — **Ledger**, iOS, ROADMAP.md M7, in progress — connects to the same API Layer as
+an additional client. It does not get its own copy of the sync pipeline, its own Gmail connection,
+or its own analytics logic; it is presentation only, exactly like the Web Dashboard box above,
+just a second box beside it reading and writing through the same API Layer.
 
 ## 2. Guiding Architectural Style
 
@@ -225,6 +231,20 @@ Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
   exception, not the norm (COR-5). Rows with no source email (`email_message_id === null`) get a
   "Manual" badge in the table and a substituted note in `TransactionDetailPanel` where "View
   source email" would otherwise be.
+- **Mobile Client — Ledger (iOS)** — a second Presentation-layer client, alongside the Web
+  Dashboard, talking to the same API Layer only (REQUIREMENTS.md §15, ADR-0023). **M7 in progress
+  (2026-07-19): Epic I (foundation) done; Epic J (transaction list & correction) through J3.**
+  Native Swift + SwiftUI, project defined via a checked-in XcodeGen `project.yml` rather than a
+  hand-edited `.xcodeproj` (`ios/Ledger/`). Module shape mirrors the frontend's own discipline — a
+  single `Networking/APIClient.swift` wraps every backend call (no view talks to `URLSession`
+  directly, the same rule `frontend/src/api/client.ts` follows), `ViewState/` holds
+  `ObservableObject` stores (the only layer allowed to call `Networking`), `Views/` holds SwiftUI
+  screens. Built so far: the 3-tab shell (Ledger/Analytics/Review), the connection-settings screen
+  (I3), the transaction list with full filtering/search/chips (J1-J2), and a transaction detail
+  sheet for correcting fields or dismissing a transaction (J3). New-transaction notifications will
+  be local (`UNNotificationRequest`), driven by the same `GET /transactions/recent` polling pattern
+  as the web dashboard's `useNewTransactionNotifications` hook — no APNs, no third-party push relay
+  (ADR-0024) — once Epic M is reached. Detailed stories in [BACKLOG.md](BACKLOG.md) Epics I–M.
 
 Each of these is swappable independently: e.g. the `GmailClient` could later be joined by a
 second bank's client without touching Extraction, Storage, or the Dashboard; the
@@ -384,6 +404,13 @@ considered and explicitly dropped (ADR-0009) — not an integration in this syst
   completes REQUIREMENTS.md §13's MVP definition, modulo the still-pending 4th email template
   (credit card credit, REQUIREMENTS.md §8). Automatic background sync (ADR-0019) and real VM
   production deployment (ADR-0020) added on top of F, same day.
+- **Ledger (iOS, M7) will not notify the owner of a new transaction while the app is fully closed
+  or backgrounded beyond a short window (ADR-0024)** — a deliberate, accepted scope, not a bug.
+  Both a real push path (direct APNs, $99/year) and a free push path (a third-party relay like
+  ntfy.sh, at the cost of transaction text transiting a third party) were presented and declined.
+  The concept design's lock-screen notification mockup is aspirational for a possible future
+  upgrade, not what M7's initial build delivers — see ADR-0024 for the full reasoning and what
+  would need to change to revisit it.
 - **TRC-1 ("every transaction retains a reference back to the original email") has an explicit,
   intentional exception: manually-added transactions (H2, COR-5, ADR-0022).**
   `transactions.email_message_id` is nullable specifically for this case — `NULL` means "added

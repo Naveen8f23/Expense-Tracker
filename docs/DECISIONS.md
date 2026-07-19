@@ -799,3 +799,177 @@ Copy this block for each new decision:
   COR-5 already anticipated this exception; this ADR is what actually implements it in the schema.
   Any future code that reads `txn.email_message`/`email_message_id` must handle `None`, the same
   way `serialize_transaction`/`effective_sort_datetime` do now.
+
+### ADR-0023: Ledger (the iOS app, ROADMAP.md M7) is built natively with Swift + SwiftUI
+
+- **Date:** 2026-07-19
+- **Status:** Accepted
+- **Decision:** The iOS companion app ("Ledger") is a native Swift + SwiftUI application, a
+  presentation-only client of the existing FastAPI backend (ADR-0003) — no new backend business
+  logic, no second copy of ingestion/classification/extraction/dedup/analytics. It talks to the
+  same REST/JSON endpoints the web dashboard already uses.
+- **Context:** The owner confirmed only an iOS app is planned right now (ROADMAP.md M7); no
+  Android build is scheduled or requested.
+- **Alternatives considered:**
+  - **Cross-platform (React Native, Flutter)** — would pay for portability to Android today, with
+    no current Android target to justify it (Constitution principle 2: no abstraction without at
+    least two concrete, current use cases — here there's only one platform). Also a heavier
+    dependency (a second runtime/framework) than a single-platform native app needs.
+- **Reasoning:** Native SwiftUI gets the exact iOS interaction model the concept design
+  (gestures, sheets, native lists) was drawn against, with zero extra plumbing for anything the
+  backlog below needs from Apple's own frameworks (local notifications, Keychain, etc.).
+- **Consequences:** If Android is ever wanted later, this is a second, separate native codebase
+  to write (not extended from this one) — an explicit, accepted tradeoff of choosing native now
+  rather than cross-platform. No backend changes are implied by this decision; Ledger consumes
+  the API surface exactly as it exists.
+
+### ADR-0024: Ledger's new-transaction notification is in-app/foreground-only — not Apple Push, not a third-party relay
+
+- **Date:** 2026-07-19
+- **Status:** Accepted
+- **Decision:**
+  1. Ledger does **not** use Apple Push Notification service (APNs), and does **not** route
+     through a third-party push relay (e.g. ntfy.sh). New-transaction alerts are delivered only
+     while the app is foregrounded or has been backgrounded for a short, OS-controlled window —
+     the same polling pattern the web dashboard already uses (`GET /transactions/recent`,
+     ADR-0019), adapted to a local `UNNotificationRequest` instead of a browser `Notification`.
+  2. A best-effort `BGAppRefreshTask` supplement (BACKLOG.md M3) may occasionally get Ledger a few
+     seconds of background execution to check once more and fire a local notification — explicitly
+     documented as unreliable, opportunistic, and never to be presented to the owner as a
+     guaranteed channel.
+  3. As a direct consequence of not enrolling in the Apple Developer Program (see below), Ledger
+     is also installed via free Xcode signing rather than TestFlight — the provisioning profile
+     expires roughly every 7 days, requiring a reconnect-and-rebuild from a Mac to keep using the
+     app. This is a real, recurring, accepted cost of the no-cost path, not a one-time step.
+- **Context:** The owner asked for a real notification the moment a new transaction is ingested —
+  exactly what the concept design's lock-screen mockup showed. Two paths were presented:
+  - **Direct APNs**: requires enrolling in the Apple Developer Program ($99/year) because Apple
+    restricts the Push Notifications App ID capability to paid accounts — no engineering
+    workaround exists for this specific platform rule.
+  - **A free third-party relay (ntfy.sh)**: sidesteps the $99/year by riding on a relay app's own,
+    already-paid Apple push entitlement — genuinely free, no developer account — at the cost of
+    transaction text (payee + amount) transiting a third party's servers briefly to be delivered.
+  The owner declined both: unwilling to pay for direct APNs, and — after the free relay option was
+  surfaced and explained — chose not to route financial data through a third party either,
+  explicitly picking the in-app-only fallback instead.
+- **Alternatives considered:**
+  - **Direct APNs ($99/year)** — rejected: the owner does not want an ongoing paid subscription
+    for this app.
+  - **ntfy.sh (or similar) relay** — rejected: the owner weighed the free-and-real-push option
+    against keeping transaction content fully first-party, once the tradeoff was made explicit,
+    and chose the latter. Revisit if the in-app-only experience proves too weak in daily use
+    (BACKLOG.md M2's explicit non-goal below) — this is a reversible choice, not a permanent one.
+  - **Background App Refresh as the primary mechanism** (no foreground requirement at all) —
+    rejected as the *primary* path: iOS schedules `BGAppRefreshTask` opportunistically based on the
+    owner's own usage patterns and battery state, often with multi-hour gaps or none at all in a
+    day — too weak to be the main promise, acceptable only as a small, honestly-labeled bonus on
+    top of the foreground-polling primary path (BACKLOG.md M3).
+- **Reasoning:** Matches Constitution principle 21 (fail loudly, don't oversell a fallback as
+  something it isn't) and principle 24 (treat cost/privacy tradeoffs as real, not incidental).
+  Given both paths to a stronger guarantee were explicitly declined, the honest thing to build is
+  exactly what was chosen — not a workaround that quietly reintroduces one of the two rejected
+  costs.
+- **Consequences:** Ledger will **not** notify the owner of a new transaction while the app is
+  fully closed or has been backgrounded for more than a short window — this is the accepted shape
+  of "in-app only," not a bug to silently patch later. The concept design's lock-screen mockup
+  (published this session) is aspirational for a *possible future* upgrade to real push, not what
+  M7's initial build actually delivers — flagged explicitly so the gap between the visual pitch
+  and the built app is never silent (Constitution principle 13). `docs/BACKLOG.md` Epic M (M2, M3)
+  implements this. Revisiting either declined option later is a new decision, not a default.
+
+### ADR-0025: Ledger reaches the backend via Tailscale VPN On Demand ("Always"), not a manual toggle or per-app VPN
+
+- **Date:** 2026-07-19
+- **Status:** Accepted
+- **Decision:** The owner configures the iOS Tailscale app's **VPN On Demand** setting to
+  *Always* connect on both Wi-Fi and Cellular interfaces, once, on their own phone. This keeps the
+  tailnet tunnel up automatically in the background so Ledger can always reach the VM
+  (REQUIREMENTS.md MOB-5) without the owner manually toggling Tailscale before each use. This is a
+  one-time device setting, not new app code — Ledger itself requires no changes to support it.
+- **Context:** Daily manual toggling of Tailscale before each Ledger use was raised as a real
+  usability problem. The owner's first instinct — "only run the VPN while Ledger is open" — was
+  investigated and found not to be available: true per-app VPN on iOS requires the
+  `app-proxy-provider` NetworkExtension entitlement, which Apple restricts to MDM-managed
+  (supervised) devices; Tailscale has an open, unresolved feature request for exactly this
+  ([tailscale/tailscale#18408](https://github.com/tailscale/tailscale/issues/18408)), so it isn't
+  a config gap on our side — it doesn't exist yet for a personal, unmanaged iPhone.
+- **Alternatives considered:**
+  - **Per-app VPN (Ledger-only tunnel)** — not possible without MDM enrollment (see above);
+    rejected as infeasible, not undesirable.
+  - **Manual Control Center/widget toggle before each use** — fully explicit, but reintroduces the
+    exact daily friction the owner wanted to eliminate; rejected as the primary path but not
+    precluded if VPN On Demand ever proves unreliable in practice.
+  - **iOS Shortcuts automation ("app opened → connect")** — investigated and rejected: known to
+    fail silently if the Tailscale app isn't already running in the background, which would make
+    reachability *less* predictable, not more (Constitution principle 21 — no silent failure modes).
+  - **Embedding Tailscale's `tsnet` library directly into Ledger** (a genuine per-app-only tunnel,
+    no OS VPN profile at all) — would satisfy the original ask exactly, but is a materially bigger
+    engineering lift (embedding Tailscale's networking stack into the Swift app) than a device
+    setting. Not pursued now; noted here as the real path if "Always" ever proves unacceptable.
+  - **"Always" was itself re-examined for a hidden cost** — the initial worry was that an
+    always-connected VPN routes all phone traffic through the tunnel. Confirmed against Tailscale's
+    own documented behavior: Tailscale is an overlay network that only carries traffic addressed to
+    other tailnet peers; it does **not** proxy general internet traffic unless the device explicitly
+    opts into an **exit node** (REQUIREMENTS.md's setup does not use one). So "Always" costs a
+    lightweight background tunnel, not a rerouting of all browsing/app traffic.
+- **Reasoning:** Given genuine per-app scoping isn't available on a personal iPhone, and the
+  always-on cost is much smaller than initially assumed (background tunnel only, no traffic
+  rerouting), "Always" On-Demand is the simplest option that still fully satisfies the original
+  goal (never touch the Tailscale toggle) without adding engineering scope to M7.
+- **Consequences:** REQUIREMENTS.md MOB-5 and BACKLOG.md I3 now name VPN On Demand ("Always" on
+  Wi-Fi + Cellular) as the specific one-time setup step, not just "Tailscale installed and
+  connected." No backend or Ledger code changes result from this decision. If VPN On Demand proves
+  unreliable in daily use (the reconnect-after-long-background edge case some users report), revisit
+  as a fresh decision — the manual-toggle and embedded-`tsnet` alternatives above remain available,
+  not ruled out permanently.
+
+### ADR-0026: The VM was never actually on Tailscale — real topology is a NAS-hosted subnet router, backend bind fixed, port migration pending
+
+- **Date:** 2026-07-19
+- **Status:** Accepted (interim state — not fully resolved; see Consequences)
+- **Decision:** Record the actual network topology discovered while getting Ledger to reach the
+  production VM, since it differs materially from what ADR-0002/ADR-0020/MOB-5 assumed, and fix
+  the one part of it that was unambiguously a bug regardless of topology (the backend's bind
+  address).
+- **Context:** Ledger reported "Unreachable — the request timed out" against the VM's supposed
+  Tailscale hostname, from both the owner's phone and, independently, from the developer's own Mac
+  (also on the same tailnet) — ruling out a phone-specific cause. Investigation found two distinct,
+  compounding issues:
+  1. **The backend was bound to `127.0.0.1` only** (`deploy/expense-tracker.service`'s
+     `ExecStart`), making it unreachable from any interface but itself, Tailscale or not. This is
+     why the web dashboard has always needed an SSH tunnel rather than direct browser access.
+  2. **The VM has never actually joined Tailscale at all** — confirmed by direct inspection: no
+     `tailscaled` process, no package in `dpkg`, no `/var/lib/tailscale` state directory, and even
+     the VM curling its own supposed Tailscale IP timed out (conclusive: a host can always reach
+     an IP genuinely assigned to itself). ADR-0002/ADR-0020's "reachable over Tailscale" framing
+     for this specific VM was aspirational, not actually completed.
+  The real topology, clarified by the owner: the VM lives on their brother's home NAS in a
+  different city; the owner reaches it by connecting to Tailscale on their own Mac, which routes
+  through the brother's NAS acting as a **Tailscale subnet router** advertising the NAS's home LAN
+  (`192.168.0.0/24`) to the tailnet — the VM itself is a plain, non-Tailscale device on that LAN.
+  This also explained a second symptom: only port 22 (SSH) was reachable through that route, other
+  ports (including the backend's) timed out — a Tailscale ACL policy (administered by the brother)
+  currently scopes the subnet route to SSH only. The brother is opening ports 6000-6500.
+- **Alternatives considered:**
+  - **Install Tailscale directly on the VM** — the original (wrong) plan, based on the mistaken
+    assumption the VM was meant to be its own tailnet peer. Abandoned once the subnet-router
+    topology was clarified — redundant and not how the owner's brother has this set up.
+  - **Bind the backend to `0.0.0.0`, plain, no firewall scoping** — chosen over adding a `ufw`
+    rule scoping it to the Tailscale/CGNAT range, given the owner's explicit preference (asked
+    directly): simplicity now, accepting that the backend is also reachable on the NAS's home LAN
+    (no login exists, single-owner design) until/unless that's revisited.
+- **Reasoning:** The bind-address fix is correct regardless of how reachability ultimately works
+  (a service bound to loopback is never reachable externally, full stop), so it was applied
+  immediately to both `deploy/expense-tracker.service` (repo) and the live VM unit, service
+  restarted. The Tailscale-topology question is the brother's infrastructure to resolve (ACL
+  policy, port range), not something fixable from this side.
+- **Consequences:** **Not yet fully resolved.** Until the brother confirms ports 6000-6500 are
+  open, Ledger development is proceeding against a backend run directly on the developer's own Mac
+  (a genuine, working Tailscale peer, confirmed reachable both by hostname and IP) — see
+  `docs/BACKLOG.md` J1's infrastructure note. Once the ports open: (1) the production backend's
+  port likely needs to move off 8000 into the newly-opened 6000-6500 range (or whatever the
+  brother settles on), requiring an update to `deploy/expense-tracker.service` and the VM's live
+  unit; (2) REQUIREMENTS.md MOB-5 should be revised to describe the actual topology (subnet
+  router, not a direct Tailscale peer) rather than the originally-assumed one; (3) this ADR should
+  be updated (not superseded — the historical record of what was actually wrong stays useful) once
+  the interim state is closed out.

@@ -130,16 +130,22 @@ Copy this block per milestone:
 - **Dependencies:** M5.
 
 ### M7: Mobile App
-- **Status:** Planned
+- **Status:** In Progress (2026-07-19)
 - **Target:** TBD
-- **Goal:** Ship a mobile app as an additional client of the existing backend/API (per
+- **Goal:** Ship "Ledger," an iOS app, as an additional client of the existing backend/API (per
   [DECISIONS.md](DECISIONS.md) ADR-0003), once the web dashboard and underlying pipeline are
   proven in real use.
-- **Requirements covered:** Same functional requirements as the web dashboard, delivered on a
-  new client surface.
-- **Success criteria:** Core flows (review/correct transactions, search, view summaries)
-  available on mobile without changes to ingestion/extraction.
-- **Dependencies:** M5, and in practice some real-world usage time on the web dashboard first.
+- **Requirements covered:** REQUIREMENTS.md §15 (MOB-1 through MOB-6) — same functional
+  requirements as the web dashboard, delivered on a new client surface, plus a new
+  in-app-notification requirement (MOB-4) the web dashboard doesn't have in quite the same form.
+- **Success criteria:** Core flows (review/correct transactions, search, view summaries, manual
+  add) available on iOS without changes to ingestion/extraction; a new-transaction notification
+  arrives while the app is open, per ADR-0024's accepted scope.
+- **Dependencies:** M5 (done). **Decided 2026-07-19:** a visual design concept was reviewed and
+  confirmed by the owner; native Swift + SwiftUI was chosen over a cross-platform framework
+  (ADR-0023); push notifications will be in-app/foreground-only, not Apple Push and not a
+  third-party relay, after both were presented and declined (ADR-0024). Detailed story breakdown
+  in [BACKLOG.md](BACKLOG.md) Epics I–M.
 
 ### M8: Multi-User Support
 - **Status:** Planned

@@ -13,6 +13,12 @@ node_modules/
 dist/
 .vite/
 
+# iOS (Ledger) — .xcodeproj and Info.plist are generated from project.yml via XcodeGen, not hand-edited
+ios/Ledger/*.xcodeproj/
+ios/Ledger/DerivedData/
+ios/Ledger/**/xcuserdata/
+ios/Ledger/Ledger/Info.plist
+
 # OS
 .DS_Store
 

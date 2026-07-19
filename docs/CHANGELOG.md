@@ -8,7 +8,125 @@ versioned releases begin.
 
 ## [Unreleased]
 
+### Added (planning, no code yet)
+- **Ledger (iOS app, ROADMAP.md M7) — visual design concept, then a five-epic backlog (2026-07-19).**
+  A visual design concept (screen mockups, navigation model, endpoint mapping) was reviewed and
+  confirmed by the owner first. Two decisions followed, made explicitly rather than assumed
+  (Constitution principle 20):
+  - **ADR-0023:** Ledger is native Swift + SwiftUI, not cross-platform — only iOS is planned for
+    now.
+  - **ADR-0024:** new-transaction notifications are in-app/foreground-only. Two stronger paths
+    were presented and declined: direct Apple Push (APNs, requires the $99/year Apple Developer
+    Program) and a free third-party push relay (ntfy.sh, which would route transaction text
+    through a third party) — the owner chose neither, picking the weaker but fully first-party,
+    fully free fallback instead. A best-effort `BGAppRefreshTask` supplement is included but
+    explicitly documented as unreliable, not a substitute for either declined path.
+  - `docs/BACKLOG.md` gained Epics I–M (iOS Foundation, Transaction List & Correction,
+    Needs-Review Queue, Analytics, Manual Add & Notifications) — the detailed story breakdown,
+    none yet started. `docs/REQUIREMENTS.md` gained §15 (MOB-1 through MOB-6). `docs/ARCHITECTURE.md`
+    and `docs/ROADMAP.md` updated to reflect M7 moving from Planned to In Progress. No backend
+    code changes — Ledger consumes the existing API surface exactly as it stands.
+- **Ledger connectivity resolved: Tailscale VPN On Demand, not a manual toggle (2026-07-19,
+  ADR-0025).** Daily manual Tailscale toggling was raised as a real usability concern. True
+  per-app-only VPN (tunnel active only while Ledger runs) was investigated and found not possible
+  on an unmanaged iPhone — it requires an MDM/supervised-device entitlement Apple doesn't grant to
+  personal devices; Tailscale itself has an open, unresolved feature request for it
+  ([tailscale/tailscale#18408](https://github.com/tailscale/tailscale/issues/18408)). Also
+  clarified: Tailscale doesn't proxy general internet traffic by default (only tailnet-addressed
+  traffic, unless an exit node is explicitly configured, which this setup doesn't use) — so the
+  "always on" cost is a lightweight background tunnel, not a full-traffic VPN. Resolved as: the
+  owner sets iOS Tailscale's **VPN On Demand to "Always" for Wi-Fi and Cellular**, once, on their
+  own phone — a device setting, not app code. `docs/REQUIREMENTS.md` MOB-5 and `docs/BACKLOG.md`
+  I3 updated to name this specific mechanism.
+
 ### Added (code)
+- **Epic J: J4 (Source email viewer) complete (2026-07-19).** New
+  `Views/SourceEmailView.swift`, reached via a "View source email" row in
+  `TransactionDetailView` (shown only when `sourceEmail` is populated — manual entries keep J3's
+  existing "no source email" note). Simpler than the web's equivalent story: SwiftUI's `Text`
+  never interprets its string as HTML, so there's no `dangerouslySetInnerHTML`-shaped risk to
+  avoid at all, just a code comment warning not to introduce one later (`NSAttributedString` HTML
+  parsing or a `WKWebView`). Verified live via the demo XCUITest harness against a real synced
+  transaction — screenshot confirms raw markup renders as literal text, not interpreted HTML.
+- **Epic J: J3's row time-display gap fixed (2026-07-19).** Transaction rows only ever showed
+  `txn_date`, missing the web dashboard's own Epic G follow-up (a time alongside the date, real or
+  an approximate "~" one) — the owner caught this. New `Networking/TransactionDisplayTime.swift`
+  mirrors `frontend/src/utils/transactionTime.tsx` exactly. Building it surfaced a second bug: the
+  real backend serializes `email_received_at`/`created_at` with no timezone suffix at all
+  (confirmed directly against the running server), which silently failed to parse — fixed by
+  appending `"Z"` before parsing, matching the frontend's own naive-UTC handling. 5 new tests (31
+  total), verified live with a screenshot against real data.
+- **Epic J: J3 (Transaction detail sheet) complete (2026-07-19).** New
+  `ViewState/TransactionDetailStore.swift` + `Views/TransactionDetailView.swift` — every row in
+  `LedgerListView` is now tappable and opens an edit sheet (amount, date, payee, category,
+  method, type) plus "Not a real expense" with a confirmation dialog. Known limitation documented
+  in code: picking "Uncategorized" can't clear an already-set category (the backend's PATCH has no
+  way to null a field, only leave it unchanged). 5 new tests (26 total). Verified live via the
+  demo XCUITest harness with the real database checked via `curl` before/after each action —
+  editing a payee name persisted correctly across two separate runs, dismissing a transaction
+  flipped its `dismissed` field server-side. One real bug found and fixed this way: the detail
+  view had a blank-screen gap before its `.task` even started (transaction nil, isLoading still
+  false, errorMessage nil — none of the three view branches matched).
+- **Epic J: J2 (Search & filter chips) complete (2026-07-19).** Debounced (~400ms) free-text and
+  a new "payee contains" field (fixing a gap where J1 never actually exposed a payee input despite
+  listing it as a required filter); removable chips for every active filter plus "Clear all". New
+  `Views/FilterChip.swift`. Verified live via an XCUITest walkthrough (screenshots): payee filter
+  narrows the list correctly, combining filters (payee + credit-type) correctly yields zero
+  results, "Clear all" resets everything.
+- **Epic J: J1 (Transaction list) complete (2026-07-19).** New
+  `ios/Ledger/Ledger/ViewState/TransactionListStore.swift` +
+  `Views/{LedgerListView,TransactionRowView,TransactionFilterSheet}.swift`. All 7 web-parity
+  filters wired (category, date range, amount range, method, type, free-text, plus pagination via
+  a "Load more" button); dismissed transactions excluded server-side, no client re-filtering.
+  4 new tests (21/21 total). Filter UI is plain/functional for now, not yet the chip-based bar
+  from the confirmed design — that's explicitly J2's job. Verified live against a real backend
+  (screenshots): both the "no connection configured" error state and a populated list with real
+  transactions, the "Manual" badge (H2), and debit/credit amount coloring.
+- **Infrastructure: fixed the VM's backend bind address; discovered Tailscale was never actually
+  set up on it (2026-07-19, ADR-0026).** While getting Ledger to talk to the production VM (I3's
+  live check), found `deploy/expense-tracker.service` bound uvicorn to `127.0.0.1` only —
+  unreachable from anywhere but itself, regardless of network. Fixed to `0.0.0.0` in both the repo
+  file and the live VM unit; service restarted. This alone didn't fix reachability: further
+  investigation found the VM has no `tailscaled` process, package, or state directory at all —
+  REQUIREMENTS.md MOB-5's "reachable over Tailscale" assumption for this VM was never actually
+  true. The owner's actual path to the VM is through their brother's NAS acting as a **Tailscale
+  subnet router** (a different topology than ADR-0002/ADR-0020 assumed) — its firewall currently
+  only forwards SSH; the brother is opening ports 6000-6500. **Not yet resolved** — once open, the
+  production port likely needs to move off 8000 into that range, and REQUIREMENTS.md MOB-5 needs
+  revising to describe the actual subnet-router topology. Meanwhile, Ledger development is
+  proceeding against the backend running directly on the developer's own Mac (a genuine Tailscale
+  peer, reachable as `naveen-zoho-macbook`).
+- **Epic I: I3 (Backend reachability & connection settings) complete, code-side (2026-07-19).**
+  New `ios/Ledger/Ledger/ViewState/ConnectionSettingsStore.swift` (`UserDefaults`-backed host/port,
+  injectable client factory for testability) + `Views/ConnectionSettingsView.swift`, reached via a
+  gear button in the Ledger tab's toolbar (no dedicated Settings tab in the confirmed 3-tab
+  design). Checks `GET /health` then `GET /sync/status`, treating a 404 there ("no Gmail account
+  yet") as still-reachable rather than an error. `APIClient` gained an explicit 8s request timeout
+  so an unreachable host fails fast rather than hanging like `URLRequest`'s ~60s default would.
+  Info.plist gained an `NSAllowsArbitraryLoads` ATS exception (the backend has no TLS cert and its
+  hostname is runtime-entered, so a scoped exception isn't possible; documented in `project.yml`
+  since Ledger is never App-Store distributed). 6 new tests, 17/17 total passing. **Not yet fully
+  done:** the settings sheet's actual UI wasn't screenshot- or tap-verified (no GUI automation
+  available in this environment) — needs a live check on the owner's phone against the real VM
+  before Epic I's checkpoint demo.
+- **Epic I: I2 (Backend API client module) complete (2026-07-19).** New
+  `ios/Ledger/Ledger/Networking/` — Codable models and one `async throws` function per backend
+  endpoint (transactions, needs-review, categories, sync status, analytics), built by reading the
+  actual serializers/routers directly rather than guessing from REQUIREMENTS.md's prose (e.g.
+  money fields are wire-level strings, `sync/status`'s `last_sync_*` keys are absent, not null,
+  before the first sync). A `URLSessionProtocol` seam plus a `StubURLSession` test double make the
+  client fully unit-testable without a real backend; 11 tests in
+  `ios/Ledger/LedgerTests/APIClientTests.swift`, all passing. Typed `APIError` (unreachable /
+  HTTP error / the one nested-object 409 shape / decode failure) — no silent failures.
+- **Epic I started: Ledger iOS Foundation, I1 (Xcode project scaffold) complete (2026-07-19).**
+  New `ios/Ledger/` — native SwiftUI app, project defined via a checked-in XcodeGen `project.yml`
+  (not a hand-edited `.xcodeproj`); folder layout (`App`/`Views`/`ViewState`/`Networking`) and its
+  dependency-direction rule documented in `ios/Ledger/README.md`, mirroring the backend's own A1
+  convention. A 3-tab (`Ledger`/`Analytics`/`Review`) skeleton shell, no networking or business
+  logic yet. Verified: builds and runs in the iOS Simulator (screenshot-checked), and separately
+  confirmed by the owner running it on their own physical iPhone via free Xcode signing
+  (ADR-0024) — including the one-time "trust this developer" / Developer Mode steps. Tab icons
+  are placeholders pending a check against the original confirmed design mockup.
 - **Epic H (Cross-cutting polish) complete (2026-07-19)** — the two remaining stories:
   - **H1 (encryption verification):** already satisfied, no new code — credited to
     `backend/tests/test_schema.py::test_sensitive_fields_are_encrypted_at_rest`, built during

@@ -1,9 +1,10 @@
 # Requirements
 
-Status: **populated (v0.5) — ingestion scope simplified to four fixed bank/UPI email types
+Status: **populated (v0.6) — ingestion scope simplified to four fixed bank/UPI email types
 (ADR-0009); three of four confirmed against real HDFC samples with a sender+content
 classification rule (ADR-0010, Appendix A). All open questions resolved except the pending 4th
 template sample (credit card credit)** — per [CONSTITUTION.md](CONSTITUTION.md) principle 19.
+**§15 added (2026-07-19): requirements for Ledger, the iOS companion app (ROADMAP.md M7).**
 
 ## 1. Overview
 
@@ -429,6 +430,25 @@ budgets, notifications, additional ingestion sources — all listed in §12.
 - **Plug-and-play module** — a component (ingestion source, extraction engine, etc.) that
   implements a defined interface and can be swapped or extended without changes to other
   modules.
+
+## 15. Mobile App (Ledger) Requirements
+
+Added 2026-07-19, per [ROADMAP.md](ROADMAP.md) M7. Ledger is an iOS companion app — a second
+client of the same backend/API the web dashboard already uses (ADR-0003), not a second copy of
+any ingestion/extraction/analytics logic.
+
+| ID | Requirement |
+|---|---|
+| MOB-1 | Ledger consumes the existing FastAPI backend's REST/JSON endpoints exclusively — no local parsing, no direct database access, no second Gmail connection. Same rule the web dashboard already follows. |
+| MOB-2 | Functional parity with the web dashboard's core flows: searchable/filterable transaction list (SRCH-1), correction (COR-1 through COR-4), traceability to the source email (TRC-1, TRC-2), needs-review queue (EXT-5, EXT-6), and analytics (ANL-1 through ANL-4). |
+| MOB-3 | **Confirmed 2026-07-19:** category assignment on Ledger is manual, identical to the web dashboard (EXT-2) — no auto-suggested category from email/transaction content. The one durability mechanic that exists is COR-2 (a category assigned to a payee is remembered for that payee's next transaction), same as the web dashboard; this is a lookup, not inference. |
+| MOB-4 | **Added 2026-07-19 (ADR-0024):** Ledger surfaces a notification when a new transaction is ingested, scoped to while the app is foregrounded or has been backgrounded for a short, OS-controlled window. This is an explicit, accepted weaker guarantee than a true push notification — nothing arrives while the app is fully closed or backgrounded for longer than that window. See ADR-0024 for why direct Apple Push (APNs, $99/year) and a free third-party push relay (e.g. ntfy.sh, which would route transaction text through a third party) were both considered and declined. |
+| MOB-5 | Ledger reaches the backend only over the owner's private Tailscale network (ADR-0002, ADR-0020) — the phone must have the Tailscale app installed, with **VPN On Demand set to "Always" for both Wi-Fi and Cellular (ADR-0025)**, so the tailnet tunnel is up automatically without a manual toggle before each use. This is a one-time device setting the owner performs themselves (same category as the Gmail OAuth consent click — not something the app can do on the owner's behalf). Per-app-only VPN (tunnel active only while Ledger runs) was investigated and found not possible on an unmanaged iPhone (ADR-0025). If the backend is unreachable, Ledger says so plainly and shows the last-known data, rather than hanging or pretending to be live. **Known gap, not yet closed (2026-07-19, ADR-0026):** the actual topology turned out to be the owner's Mac reaching the VM through a relative's NAS acting as a Tailscale subnet router (not the VM itself being a direct Tailscale peer, as originally assumed) — that route's firewall currently only allows SSH through. Until it's widened, Ledger development is proceeding against a backend run on the owner's own Mac (a genuine Tailscale peer) instead of the VM. This row's wording describes the intended end state, not the current one — see ADR-0026 for the gap and BACKLOG.md J1's infrastructure note for the day-to-day workaround. |
+| MOB-6 | Manual "add a transaction" (COR-5) is available on Ledger, reached the same way as on the web dashboard — a deliberate one-tap-deeper affordance, not a primary tab, so it stays the rare exception it's meant to be. |
+
+**Assumption confirmed 2026-07-19:** only an iOS build is currently planned; no Android client is
+scheduled (ADR-0023). If that changes later, it's a new client built on the same backend/API, not
+a retrofit of Ledger's own Swift code.
 
 ## Appendix A: Known Email Templates (reference)
 
