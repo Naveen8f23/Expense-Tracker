@@ -5,8 +5,16 @@ struct RootTabView: View {
     // Owned here, not inside ReviewView, so its BACKLOG.md K4 badge count is visible on the tab
     // item itself — a child view's @StateObject can't be read from the parent TabView around it.
     @StateObject private var needsReviewStore = NeedsReviewStore()
+    // BACKLOG.md M2 — owned here (not any one tab) since polling/notifying must keep running
+    // regardless of which tab is currently showing.
+    @StateObject private var notifier = NewTransactionNotifier()
+    @State private var deepLinkCategories: [Category] = []
     @State private var selectedTab = 0
     @Environment(\.scenePhase) private var scenePhase
+
+    /// A single `Identifiable` wrapper around the notifier's plain `Int?`, mirroring
+    /// `PayeeSelection`'s own reasoning — `.sheet(item:)` needs one value, not a derived Bool.
+    private struct DeepLinkTarget: Identifiable { let id: Int }
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -30,7 +38,11 @@ struct RootTabView: View {
                 // A 0-value badge renders nothing, so this naturally hides once the queue is empty.
                 .badge(needsReviewStore.totalCount)
         }
-        .task { await refreshNeedsReview() }
+        .task {
+            await refreshNeedsReview()
+            notifier.requestAuthorization()
+            notifier.startPolling(baseURL: connectionSettings.baseURL)
+        }
         // BACKLOG.md K4 — the badge reflects the queue size "as of the last time it was fetched
         // (app foreground/tab switch)", not a live count. These are the only two refresh triggers;
         // there is no polling/push mechanism (ADR-0024).
@@ -38,7 +50,25 @@ struct RootTabView: View {
             if newValue == 2 { Task { await refreshNeedsReview() } }
         }
         .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active { Task { await refreshNeedsReview() } }
+            if newPhase == .active {
+                Task { await refreshNeedsReview() }
+                // No-op if already running (BACKLOG.md M2) — iOS suspends the poll loop's Task
+                // along with the rest of the process once fully backgrounded; this just covers
+                // the case where the loop somehow isn't running yet (e.g. right after launch).
+                notifier.startPolling(baseURL: connectionSettings.baseURL)
+            }
+        }
+        .sheet(
+            item: Binding(
+                get: { notifier.deepLinkTransactionId.map(DeepLinkTarget.init) },
+                set: { if $0 == nil { notifier.deepLinkTransactionId = nil } }
+            )
+        ) { target in
+            TransactionDetailView(transactionId: target.id, categories: deepLinkCategories)
+        }
+        .task(id: notifier.deepLinkTransactionId) {
+            guard notifier.deepLinkTransactionId != nil, let baseURL = connectionSettings.baseURL else { return }
+            deepLinkCategories = (try? await APIClient(baseURL: baseURL).listCategories().items) ?? []
         }
     }
 

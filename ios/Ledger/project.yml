@@ -38,6 +38,13 @@ targets:
         # Store ATS review doesn't apply. Revisit if the backend ever gets a real TLS cert.
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+        # BACKLOG.md M3 — required for a BGAppRefreshTask to ever be scheduled/run at all; this is
+        # the registration surface, not a promise the system actually grants time (it usually
+        # doesn't more than a few times a day, per ADR-0024's own "best-effort" framing).
+        UIBackgroundModes:
+          - fetch
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.naveen8f23.Ledger.refresh
 
   LedgerTests:
     type: bundle.unit-test

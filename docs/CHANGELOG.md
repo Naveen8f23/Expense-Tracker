@@ -40,6 +40,24 @@ versioned releases begin.
   I3 updated to name this specific mechanism.
 
 ### Added (code)
+- **Epic M complete: M1-M3 (2026-07-19), closing out Ledger's entire backlog (ROADMAP.md M7 done).**
+  M1 adds a create-only "Add Transaction" sheet (`ViewState/AddTransactionStore.swift` +
+  `Views/AddTransactionView.swift`), reached via a new toolbar "+", reusing J6's inline
+  "+ New category…" pattern. M2 adds in-app new-transaction notifications
+  (`ViewState/NewTransactionNotifier.swift`, owned by `RootTabView`): polls
+  `GET /transactions/recent` every ~5s while foregrounded, fires a local `UNNotificationRequest`
+  per new transaction, and deep-links a tapped notification straight to that transaction's J3
+  detail sheet via a `PayeeSelection`-shaped `Identifiable` value (not a `Bool` + `Int` pair). M3
+  adds a best-effort `BGAppRefreshTask` supplement (`App/LedgerApp.swift`, new
+  `UIBackgroundModes`/`BGTaskSchedulerPermittedIdentifiers` Info.plist keys), reusing M2's exact
+  `poll()` logic rather than a second implementation. `lastSeenId`/`hasBaseline` are now persisted
+  in `UserDefaults` (not just in memory) so a `BGAppRefreshTask`'s fresh process can resume from
+  the same baseline the foreground loop left off at. 76/76 iOS unit tests passing (10 new). M1 and
+  M2's poll→schedule pipeline verified live against the real local backend (M2's actual banner
+  proved hard to screenshot in time — confirmed instead via temporary instrumentation that
+  scheduling itself succeeded with no OS error); M3's actual background firing could not be
+  verified in this environment (Simulator + no attached debugger) — an honestly-flagged gap, see
+  BACKLOG.md M3.
 - **Epic L complete: L1-L3 (2026-07-19), the Analytics tab.** New `ViewState/AnalyticsStore.swift`
   + `Views/AnalyticsView.swift` (monthly summary + category breakdown, sharing one month cursor per
   ADR-0021) and `ViewState/PayeeHistoryStore.swift` + `Views/PayeeHistoryView.swift` (payee history

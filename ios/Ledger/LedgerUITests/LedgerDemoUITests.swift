@@ -220,6 +220,77 @@ final class LedgerDemoUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Ledger"].waitForExistence(timeout: 3))
     }
 
+    /// BACKLOG.md M1 — the "+" toolbar escape hatch for a transaction with no source email.
+    func testM1AddTransaction() throws {
+        let scratchDir = "/private/tmp/claude-502/-Users-naveen-18163-projects-expense-tracker/c95f4903-6984-4003-a537-c6b6ecf8eb63/scratchpad"
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["Ledger"].waitForExistence(timeout: 5))
+        let addButton = app.buttons["Add transaction"]
+        XCTAssertTrue(addButton.waitForExistence(timeout: 5))
+        addButton.tap()
+
+        XCTAssertTrue(app.navigationBars["Add Transaction"].waitForExistence(timeout: 5))
+        capture(app, "demo_m1_01_form", scratchDir)
+
+        let amountField = app.textFields["Amount"]
+        XCTAssertTrue(amountField.waitForExistence(timeout: 3))
+        amountField.tap()
+        amountField.typeText("42")
+
+        let payeeField = app.textFields["Payee"]
+        payeeField.tap()
+        payeeField.typeText("Corner Kirana Store")
+
+        // Save is disabled until amount + payee are both present — confirm it's enabled now.
+        let saveButton = app.navigationBars["Add Transaction"].buttons["Save"]
+        XCTAssertTrue(saveButton.isEnabled)
+        capture(app, "demo_m1_02_filled_in", scratchDir)
+
+        saveButton.tap()
+        XCTAssertTrue(app.staticTexts["Ledger"].waitForExistence(timeout: 5))
+
+        let newRow = app.cells.containing(.button, identifier: "Corner Kirana Store").firstMatch
+        XCTAssertTrue(newRow.waitForExistence(timeout: 5), "the manually-added transaction must appear in the list")
+        capture(app, "demo_m1_03_appears_in_list", scratchDir)
+    }
+
+    /// BACKLOG.md M2 — poll-driven local notification for a new transaction. `Process`/`NSTask`
+    /// isn't available on iOS (this bundle compiles for the iOS SDK, even though XCUITest code
+    /// executes via the simulator), so this smoke test alone can't create a "new" transaction
+    /// mid-run and observe the resulting SpringBoard banner (which isn't reliably queryable from
+    /// this app's own `XCUIApplication` anyway). The actual poll → detect → schedule pipeline was
+    /// separately verified live this session by creating a real transaction via `curl` from the
+    /// host side while this app ran, and confirming via temporary instrumentation that
+    /// `NewTransactionNotifier.poll()` correctly detected it and `UNUserNotificationCenter`
+    /// reported the request scheduled with no error (see BACKLOG.md M2 for the full account).
+    /// This test just confirms the app launches cleanly and the permission prompt is handled
+    /// without crashing or hanging.
+    func testM2NewTransactionNotification() throws {
+        let scratchDir = "/private/tmp/claude-502/-Users-naveen-18163-projects-expense-tracker/c95f4903-6984-4003-a537-c6b6ecf8eb63/scratchpad"
+        let app = XCUIApplication()
+
+        // Handle the system notification-permission alert the moment it appears.
+        addUIInterruptionMonitor(withDescription: "Notification permission") { alert in
+            let allow = alert.buttons["Allow"]
+            if allow.exists {
+                allow.tap()
+                return true
+            }
+            return false
+        }
+
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Ledger"].waitForExistence(timeout: 5))
+        // Tapping the (inert) nav bar title, not the app body, services the interruption monitor
+        // without accidentally tapping a real row/button underneath the permission alert.
+        app.navigationBars["Ledger"].tap()
+        Thread.sleep(forTimeInterval: 2)
+        capture(app, "demo_m2_00_launched", scratchDir)
+        XCTAssertTrue(app.staticTexts["Ledger"].exists, "app must still be alive and responsive after the permission prompt")
+    }
+
     /// BACKLOG.md Epic K walkthrough — the Review tab (K1), swipe-to-ignore (K2), tapping a
     /// low-confidence transaction reuses J3's sheet (K3), and the tab badge (K4).
     func testEpicKReviewTab() throws {

@@ -25,6 +25,9 @@ struct LedgerListView: View {
     // this view's own body re-evaluating for unrelated reasons, and the sheet ended up reading
     // the String's stale default. One value can't be internally inconsistent with itself.
     @State private var payeeSelection: PayeeSelection?
+    // BACKLOG.md M1 — reached only via this toolbar "+", never its own tab, per the confirmed
+    // design's explicit reasoning: kept a deliberate one-tap-deeper exception, not encouraged.
+    @State private var showingAddTransaction = false
 
     var body: some View {
         NavigationStack {
@@ -55,6 +58,14 @@ struct LedgerListView: View {
                             Image(systemName: "line.3.horizontal.decrease.circle")
                         }
                         .accessibilityLabel("Filters")
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showingAddTransaction = true
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .accessibilityLabel("Add transaction")
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
@@ -94,6 +105,13 @@ struct LedgerListView: View {
                 }
                 .sheet(item: $payeeSelection) { selection in
                     PayeeHistoryView(payeeName: selection.name)
+                }
+                .sheet(isPresented: $showingAddTransaction) {
+                    AddTransactionView(
+                        categories: store.categories,
+                        onCreated: { Task { await reload() } },
+                        onCategoryCreated: { Task { await store.refreshCategories(baseURL: connectionSettings.baseURL) } }
+                    )
                 }
                 .sheet(item: $selectedTransaction) { transaction in
                     TransactionDetailView(

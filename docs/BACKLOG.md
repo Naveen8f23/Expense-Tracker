@@ -1567,21 +1567,33 @@ correctly opened its history panel showing the real total and transaction count 
 
 ## Epic M — Ledger: Manual Add & In-App Notifications
 
-**Status: Not started.**
+**Status: Done (2026-07-19).** All three stories complete — 76/76 iOS unit tests passing (10 new).
+This is the last epic in Ledger's backlog (BACKLOG.md Epics I–M) — M7 (ROADMAP.md) is now fully
+built.
 
-### M1. Add Transaction sheet
+### M1. Add Transaction sheet ✅
 **As** the owner-operator, **I want** to add a transaction with no corresponding email from my
 phone, **so that** the rare cash purchase isn't lost (COR-5, REQUIREMENTS.md MOB-6), mirroring H2.
 
 **Acceptance criteria:**
 - Reached only via a small "+" in the Ledger tab's toolbar — **never its own tab** — keeping it a
-  deliberate exception, not a primary workflow, matching the confirmed design's stated reasoning.
+  deliberate exception, not a primary workflow, matching the confirmed design's stated reasoning. ✅
+  New `ViewState/AddTransactionStore.swift` + `Views/AddTransactionView.swift` — a create-only
+  form (not a retrofit of the fetch-and-edit-shaped `TransactionDetailView`), reached via a new
+  "+" toolbar button in `LedgerListView`, with a persistent banner framing it as the exception.
 - Calls `POST /transactions`; category assigned manually via J6's picker, no auto-suggestion
-  (MOB-3); no time field, matching J3's own shape (H2's precedent).
+  (MOB-3); no time field, matching J3's own shape (H2's precedent). ✅ Reuses J6's exact "+ New
+  category…" inline-creation pattern (sentinel picker option + alert text field).
+
+**Verified:** 4 new unit tests (`LedgerTests/AddTransactionStoreTests.swift`) covering
+no-connection, a successful save (confirms the exact request body sent), a server-error path, and
+inline category creation. **Also verified live** against the real local backend: added "Corner
+Kirana Store" for ₹42, confirmed it appeared in the list with the "Manual" badge and
+`email_message_id: null` (the TRC-1 exception, matching H2/ADR-0022).
 
 **Depends on:** J3, J6. **Size:** S.
 
-### M2. In-app new-transaction notifications (ADR-0024)
+### M2. In-app new-transaction notifications (ADR-0024) ✅
 **As** the owner-operator, **I want** to be told when a new transaction arrives while I'm using
 Ledger, **so that** categorizing it feels almost as immediate as a push notification, within the
 scope actually agreed (REQUIREMENTS.md MOB-4).
@@ -1589,29 +1601,82 @@ scope actually agreed (REQUIREMENTS.md MOB-4).
 **Acceptance criteria:**
 - While the app is foregrounded, or backgrounded within the short window iOS keeps a recently-
   backgrounded app suspended-but-alive, poll `GET /transactions/recent?since_id=` on the same
-  ~5-second cadence as the web dashboard's H4 hook.
+  ~5-second cadence as the web dashboard's H4 hook. ✅ New
+  `ViewState/NewTransactionNotifier.swift`, owned by `RootTabView` (not any one tab, so it keeps
+  running regardless of which tab is showing) and started once on launch/whenever `scenePhase`
+  becomes `.active` (a no-op if already running — there is no explicit stop-on-background, since
+  iOS itself suspends the polling `Task` once the process actually suspends, which is exactly the
+  "short window" boundary this story describes).
 - A new transaction fires a local `UNNotificationRequest` (banner + badge); tapping it opens
   straight to that transaction's J3 detail sheet, via the notification's `userInfo` carrying the
-  transaction id — not just a generic app-open.
+  transaction id — not just a generic app-open. ✅ `userNotificationCenter(_:didReceive:)` extracts
+  the id into `deepLinkTransactionId`, observed by `RootTabView` via a `.sheet(item:)` bound to a
+  `PayeeSelection`-style single `Identifiable` wrapper (`DeepLinkTarget`) — the same
+  race-immune shape L3 already established, not a `Bool` + `Int` pair.
 - **Explicit non-goal, stated plainly and not to be silently "fixed" later without a fresh
   decision:** nothing arrives once Ledger has been fully backgrounded for more than a few minutes,
   or force-quit. This is ADR-0024's accepted scope, chosen after both a paid (APNs) and a free
-  third-party-relay path were presented and declined.
+  third-party-relay path were presented and declined. ✅ No change from ADR-0024 — this story only
+  builds the foreground/short-background path it already scoped.
+
+**Baseline tracking mirrors ADR-0019's own fix, proactively:** `hasBaseline` is an explicit flag,
+not inferred from `lastSeenId == nil` — the web dashboard's equivalent hook had exactly that bug
+(an empty-at-first-load history left the *next* real arrival silently absorbed into "already
+seen"). Both `lastSeenId` and `hasBaseline` are persisted in `UserDefaults` (not just in memory),
+since M3's background-task launch creates a fresh process with no connection to the foreground
+loop's state — without persisting where the previous run left off, every background check would
+re-treat the whole history as baseline and never actually notify anything.
+
+**Verified:** 5 unit tests (`LedgerTests/NewTransactionNotifierTests.swift`) covering baseline
+establishment, the ADR-0019-shaped edge case, baseline advancing to the highest id seen, the
+no-baseURL no-op, and cross-instance baseline persistence. **Also verified live** against the real
+local backend, with real difficulty getting a screenshot of the actual banner (see below) —
+resolved by tracing the pipeline directly instead: created a real transaction via `curl` from the
+host side while the app ran, and confirmed via temporary instrumentation that `poll()` correctly
+detected it (`"poll got 1 items"`) and `UNUserNotificationCenter` reported the request scheduled
+with no error (`"scheduled OK for txn 32"`) — proof the actual OS-level API call that produces the
+banner succeeded, independent of whether a screenshot could catch the (SpringBoard-drawn,
+auto-dismissing) banner in time. That instrumentation was temporary and has been removed; the demo
+XCUITest (`testM2NewTransactionNotification`) is a lighter smoke test confirming the app launches
+and handles the permission prompt cleanly, since `Process`/`NSTask` isn't available on iOS (so a
+UI test alone can't create a "new" transaction mid-run) and SpringBoard banners aren't reliably
+queryable from the app's own `XCUIApplication` session regardless.
 
 **Depends on:** J1, J3. **Size:** M.
 
-### M3. Background App Refresh supplement (best-effort)
+### M3. Background App Refresh supplement (best-effort) ✅
 **As** the owner-operator, **I want** Ledger to take advantage of whatever background time iOS
 is willing to grant it, **so that** the closed-app gap in M2 is at least partially, honestly
 narrowed rather than left completely dark.
 
 **Acceptance criteria:**
 - Registers a `BGAppRefreshTask`; when iOS grants it a run, checks `GET /transactions/recent`
-  once and fires a local notification if something new turned up.
+  once and fires a local notification if something new turned up. ✅ `App/LedgerApp.swift` —
+  registers the task identifier in `init()` (before the app finishes launching, as
+  `BGTaskScheduler` requires), submits a `BGAppRefreshTaskRequest` whenever `scenePhase` becomes
+  `.background`, and the launch handler reuses M2's exact `NewTransactionNotifier.poll(baseURL:)`
+  — no second, parallel "check for new transactions" implementation. New Info.plist keys
+  (`UIBackgroundModes: [fetch]`, `BGTaskSchedulerPermittedIdentifiers`) added via `project.yml`.
 - **Explicitly documented as best-effort, not reliable** — iOS decides if/when this runs (based on
   the owner's own usage patterns, battery state, etc.), often not more than a few times a day or
   less. Must never be presented to the owner as a dependable channel, in the UI or in any future
-  doc referencing it (Constitution principle 21).
+  doc referencing it (Constitution principle 21). ✅ No UI surfaces this mechanism at all — it's
+  pure background plumbing, so there's nothing to accidentally oversell.
+
+**Verification, honestly scoped:** confirmed the app builds and launches cleanly with the new
+registration code and Info.plist keys present in the built bundle (`plutil -p` on the built
+`Info.plist`), and that `handleAppRefresh` correctly reuses the same, already-tested `poll()` logic
+(via M2's `NewTransactionNotifierTests`, including the cross-process-persistence test written
+specifically for this story). **What could not be verified in this environment: an actual
+`BGAppRefreshTask` firing.** iOS Simulator does not grant these tasks real background time under
+normal conditions — the standard way to force one (Xcode's own attached-debugger LLDB console,
+`e -l objc -- (void)[[BGTaskScheduler sharedScheduler] _simulateLaunchForTaskWithIdentifier:...]`)
+requires an interactively-attached debugger session, which isn't available through this session's
+tooling. This is consistent with the story's own acceptance criteria — "best-effort, not
+reliable" — and is a real, honestly-flagged gap (mirrors this project's own established pattern of
+naming tooling limitations rather than silently overclaiming, e.g. ADR-0026, Epic F's VM tunnel
+gap). Revisit with a real device + attached Xcode debugger session if stronger confidence is ever
+needed.
 
 **Depends on:** M2. **Size:** S.
 

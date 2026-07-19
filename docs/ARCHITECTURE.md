@@ -232,14 +232,15 @@ Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
   "Manual" badge in the table and a substituted note in `TransactionDetailPanel` where "View
   source email" would otherwise be.
 - **Mobile Client — Ledger (iOS)** — a second Presentation-layer client, alongside the Web
-  Dashboard, talking to the same API Layer only (REQUIREMENTS.md §15, ADR-0023). **M7 in progress
-  (2026-07-19): Epics I, J (J1-J7), K (needs-review queue, K1-K4), and L (analytics, L1-L3) all
-  done.** Native Swift + SwiftUI, project defined via a checked-in XcodeGen `project.yml` rather
+  Dashboard, talking to the same API Layer only (REQUIREMENTS.md §15, ADR-0023). **M7 done
+  (2026-07-19): Epics I, J (J1-J7), K (needs-review queue, K1-K4), L (analytics, L1-L3), and M
+  (manual add & in-app notifications, M1-M3) all complete — the full Ledger backlog is built.**
+  Native Swift + SwiftUI, project defined via a checked-in XcodeGen `project.yml` rather
   than a hand-edited `.xcodeproj` (`ios/Ledger/`). Module shape mirrors the frontend's own
   discipline — a single `Networking/APIClient.swift` wraps every backend call (no view talks to
   `URLSession` directly, the same rule `frontend/src/api/client.ts` follows), `ViewState/` holds
   `ObservableObject` stores (the only layer allowed to call `Networking`), `Views/` holds SwiftUI
-  screens. Built so far: the 3-tab shell (Ledger/Analytics/Review), the connection-settings screen
+  screens. Built: the 3-tab shell (Ledger/Analytics/Review), the connection-settings screen
   (I3), the transaction list with full filtering/search/chips (J1-J2), a transaction detail sheet
   for correcting fields or dismissing a transaction (J3), the source email viewer (J4), swipe
   actions for quick edit/dismiss (J5), a "Manage categories" screen plus inline "+ New category…"
@@ -247,21 +248,28 @@ Modules, matching [REQUIREMENTS.md](REQUIREMENTS.md) §3:
   `GET /needs-review` as separate sections with reason chips, swipe-to-ignore for unmatched emails,
   low-confidence transactions reusing J3's own detail sheet rather than a separate form, and a tab
   badge (`RootTabView` owns the shared `NeedsReviewStore` so the badge is visible outside
-  `ReviewView` itself) refetched on launch/tab-switch/foreground only — no polling; and the
+  `ReviewView` itself) refetched on launch/tab-switch/foreground only — no polling; the
   Analytics tab (L1-L3) — a monthly summary with a Previous/Next switcher, a category breakdown
   sharing the same month cursor (ADR-0021), and a payee history panel reached by tapping a payee
   name anywhere it appears (`TransactionRowView`'s `onPayeeTapped`, a `PayeeSelection` value
-  driving `.sheet(item:)`). **Two real SwiftUI bugs found and fixed via live verification during
-  L1/L3 — both variations on "state that must stay internally consistent, read at two different
-  times":** a `.task` attached to a `List`'s conditional content restarted unpredictably (fixed by
-  moving the month switcher outside the `List` and making it the one, explicit trigger via
-  `.task(id:)`); and a `Bool` + `String` pair driving a sheet let the content closure read a stale
-  default (fixed by replacing both with one `Identifiable` optional, the same shape
-  `selectedTransaction` already used reliably). New-transaction notifications will be local
-  (`UNNotificationRequest`), driven by the same `GET /transactions/recent` polling pattern as the
-  web dashboard's `useNewTransactionNotifications` hook — no APNs, no
-  third-party push relay (ADR-0024) — once Epic M is reached. Detailed stories in
-  [BACKLOG.md](BACKLOG.md) Epics I–M.
+  driving `.sheet(item:)`); and Epic M — a create-only "Add Transaction" sheet (M1, reached via a
+  toolbar "+", reusing J6's inline category-creation pattern) and in-app new-transaction
+  notifications (M2/M3): `ViewState/NewTransactionNotifier.swift`, owned by `RootTabView`, polls
+  `GET /transactions/recent` every ~5s while foregrounded and fires a local `UNNotificationRequest`
+  per new transaction, with `lastSeenId`/`hasBaseline` persisted in `UserDefaults` so a
+  `BGAppRefreshTask` launch (a fresh process, M3, registered in `App/LedgerApp.swift`) can resume
+  from the same baseline rather than re-treating all history as new. **Three real SwiftUI/iOS bugs
+  found and fixed via live verification across L and M — all the same underlying shape, "state
+  that must stay internally consistent, read at two different times":** a `.task` attached to a
+  `List`'s conditional content restarted unpredictably (fixed by moving the month switcher outside
+  the `List` and making it the one, explicit trigger via `.task(id:)`); a `Bool` + `String` pair
+  driving a sheet let the content closure read a stale default (fixed by replacing both with one
+  `Identifiable` optional, the same shape `selectedTransaction`/`PayeeSelection` already used
+  reliably — reused again for M2's notification-tap deep link); and the web dashboard's own
+  ADR-0019 "empty-baseline" bug was avoided proactively in M2 by keeping `hasBaseline` explicit
+  rather than inferred. M3's actual `BGAppRefreshTask` firing could not be verified in this
+  environment (Simulator + no attached debugger) — an honestly-flagged gap, not a false claim of
+  verification (see BACKLOG.md M3). Detailed stories in [BACKLOG.md](BACKLOG.md) Epics I–M.
 
 Each of these is swappable independently: e.g. the `GmailClient` could later be joined by a
 second bank's client without touching Extraction, Storage, or the Dashboard; the
