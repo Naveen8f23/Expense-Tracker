@@ -106,8 +106,8 @@ resolve, because vendor emails are no longer ingested at all.
 
 | ID | Requirement |
 |---|---|
-| ANL-1 | Spending summaries by time period (daily/weekly/monthly/yearly). |
-| ANL-2 | Category breakdown (spend by category, over a selected period), based on the user-assigned categories (EXT-2). |
+| ANL-1 | Spending summaries by time period (daily/weekly/monthly/yearly). **Fully met on Ledger as of 2026-07-20** — G2/L1 originally only built the monthly case; a day/week/month/year picker (`GET /analytics/summary`, a new endpoint alongside the untouched month-only one) closes the rest of this requirement. Week is Monday-start (owner's explicit choice). Not built on the web dashboard, which stays month-only (REQUIREMENTS.md's iOS-only focus, 2026-07-20). |
+| ANL-2 | Category breakdown (spend by category, over a selected period), based on the user-assigned categories (EXT-2). **Extended the same way as ANL-1** — `GET /analytics/category-breakdown` follows the same flexible period. |
 | ANL-3 | Payee history (all transactions with a given payee/merchant; total spend per payee). |
 | ANL-4 | Monthly report view combining the above into a single digestible summary. |
 

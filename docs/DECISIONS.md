@@ -1090,3 +1090,50 @@ Copy this block for each new decision:
   `curl http://turnny-vm:8000/health` and `.../sync/status` both returned real, live data from the
   Mac after the tailnet switch. ADR-0026 is left unedited as the historical record of the dead-end
   path; its status line now points here.
+
+### ADR-0029: Flexible-period analytics (day/week/month/year) is new endpoints, not a change to the existing month-only ones; week is Monday-start
+
+- **Date:** 2026-07-20
+- **Status:** Accepted
+- **Decision:**
+  1. Two new backend endpoints, `GET /analytics/summary` and `GET /analytics/category-breakdown`
+     (both taking `period=day|week|month|year` + an optional anchor `date`), sit alongside the
+     existing `GET /analytics/monthly` and `GET /analytics/by-category` — which are completely
+     untouched. Only Ledger calls the new ones; the web dashboard keeps calling the old ones exactly
+     as before.
+  2. A week is Monday-start. Both the backend (`week_bounds`,
+     `app/application/analytics.py`) and Ledger (`AnalyticsStore.canonicalAnchor`) compute it the
+     same explicit way — `anchor - (days since the most recent Monday)` — rather than either side
+     leaning on a calendar library's own week-of-year semantics.
+- **Context:** REQUIREMENTS.md ANL-1 always specified "daily/weekly/monthly/yearly," but Epic
+  G2/L1 only ever built the monthly case. The owner asked directly for the rest of it on Ledger.
+  Per [[feedback_ios_only_focus]], this is iOS-only — the web dashboard's own analytics view is
+  explicitly out of scope now.
+- **Alternatives considered:**
+  - **Extend `/analytics/monthly`/`/analytics/by-category` with optional `period`/`date` params**,
+    falling back to the existing `month`-based behavior when absent — technically workable (both
+    would ultimately share the same underlying range-aggregation code either way), but adds
+    conditional branching to endpoints that were simple and single-purpose, and makes it less
+    obvious at a glance which endpoint a given client is meant to call. Rejected in favor of two
+    clearly-named, single-purpose endpoints.
+  - **Foundation's `Calendar` `weekOfYear`/`yearForWeekOfYear` components** for the client-side week
+    calculation, paired with Python's `isocalendar()` or similar server-side — rejected: ISO
+    week-numbering has its own year-boundary edge cases (e.g. the first days of January can belong
+    to the previous ISO year's last week) that have no reason to enter into what's actually a much
+    simpler requirement here (just "the 7 days starting from the most recent Monday"). Computing it
+    the same explicit, simple way on both sides removes any chance of the two disagreeing, and is
+    easier to verify by reading.
+- **Reasoning:** Duplication was avoided at the *logic* level, not the *endpoint* level —
+  `_aggregate_totals`/`_category_rows` (new shared helpers in `app/application/analytics.py`) are
+  called by both the legacy month-only functions and the new period-flexible ones, so there is
+  exactly one place that could get the aggregation query wrong, even though there are two sets of
+  endpoints (Constitution principle 7: avoid duplication in the logic, not necessarily in every
+  surface). This also means the legacy endpoints' behavior is provably unchanged — they're now thin
+  wrappers around the same shared helpers they always effectively used, just not yet factored out.
+- **Consequences:** `PeriodAnalytics`/`PeriodCategoryBreakdownResponse` (Ledger) and
+  `PeriodSummary`/`PeriodCategoryBreakdown` (backend) are new, separate types from
+  `MonthlyAnalytics`/`CategoryBreakdownResponse` and their backend equivalents, even though the
+  shapes mostly overlap — accepted as reasonable duplication for two independent API contracts
+  (Constitution principle 7 again: two things that look alike today but serve different callers).
+  If the web dashboard ever wants day/week/year views too, it would call these same new endpoints
+  directly — no backend change needed, only frontend work, at that point a fresh decision.

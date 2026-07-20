@@ -1478,6 +1478,26 @@ Two real bugs were found and fixed via live verification, both the same underlyi
 J6's: don't let two pieces of state (or two independent triggers) that must stay in sync drift
 apart. See L1 and L3 below for what each one actually was.
 
+**L1 follow-up: flexible day/week/month/year period, closing out ANL-1 in full (2026-07-20).**
+Requested directly by the owner — L1 as originally built only ever supported "month," even though
+ANL-1 always specified daily/weekly/monthly/yearly. A new `AnalyticsPeriod` (`day`/`week`/`month`/
+`year`) replaces the month-only cursor; `AnalyticsStore`'s `period`+`anchorDate` drive a segmented
+picker in `AnalyticsView.swift`, feeding two new backend endpoints
+(`GET /analytics/summary`, `GET /analytics/category-breakdown`) rather than changing the existing
+month-only ones — the web dashboard's `/analytics/monthly`/`/analytics/by-category` calls are
+completely untouched (per the owner's "focus on the app only" instruction, [[feedback_ios_only_focus]]).
+Week is Monday-start (owner's explicit choice when asked); the client mirrors the backend's exact
+`anchor - timedelta(days=anchor.weekday())` algorithm rather than relying on Foundation's own
+`weekOfYear` component, so client and server can never disagree about which 7 days make up "this
+week." See DECISIONS.md ADR-0029. 156/156 backend tests passing (8 new); Ledger's own unit tests
+cover `canonicalAnchor`/`goToPrevious`/`goToNext`/`selectPeriod` for all four periods. Verified live
+via the demo XCUITest harness against the real local backend — screenshots confirm Month ("July
+2026"), Week ("Jun 29 – Jul 5, 2026"), and Year ("2026") all show correct, distinct totals.
+**One real bug found and fixed this way:** the very first live pass returned `404 Not Found` from
+both new endpoints — not a code bug, but the long-running local dev backend process (started
+earlier in the session, no `--reload`) was simply still serving the pre-change code; restarting it
+picked up the new routes immediately.
+
 ### L1. Analytics tab — monthly summary ✅
 **As** the owner-operator, **I want** the monthly total on my phone, **so that** I can see my
 spending at a glance without opening a laptop (ANL-1, ANL-4).

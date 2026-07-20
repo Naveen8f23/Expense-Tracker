@@ -8,6 +8,32 @@ versioned releases begin.
 
 ## [Unreleased]
 
+### Added (code)
+- **Ledger: flexible day/week/month/year analytics, closing out ANL-1 in full (2026-07-20).**
+  Requested directly by the owner — the Analytics tab only ever supported "month," even though
+  REQUIREMENTS.md ANL-1 always specified all four granularities. New backend endpoints
+  `GET /analytics/summary` and `GET /analytics/category-breakdown` (`period=day|week|month|year` +
+  an anchor `date`) sit alongside the existing month-only `/analytics/monthly`/`/analytics/by-category`,
+  which are completely untouched — the web dashboard is unaffected, per the owner's "focus on the
+  app only" instruction. `app/application/analytics.py` gained `day_bounds`/`week_bounds`/
+  `year_bounds` plus shared `_aggregate_totals`/`_category_rows` helpers, extracted so the legacy
+  and new endpoints can never disagree about what a given range totals to. Week is Monday-start
+  (the owner's explicit choice when asked); Ledger's new `AnalyticsStore.canonicalAnchor` mirrors
+  the backend's exact `anchor - timedelta(days=anchor.weekday())` algorithm rather than trusting
+  Foundation's own week-of-year semantics, so client and server can never disagree about which 7
+  days make up "this week." `AnalyticsView.swift` gained a segmented Day/Week/Month/Year picker
+  replacing the old plain month switcher; Previous/Next now shift by whichever granularity is
+  selected, and the label is derived from the server's own returned date range (never recomputed
+  client-side) so it can't drift from what was actually aggregated. See DECISIONS.md ADR-0029 for
+  the full design reasoning (new endpoints vs. extending the old ones, Monday-start week). 156/156
+  backend tests passing (8 new); Ledger's own unit tests cover every period's anchor/navigation
+  math. Verified live via the demo XCUITest harness against the real local backend — Month ("July
+  2026"), Week ("Jun 29 – Jul 5, 2026"), and Year ("2026") each show correct, distinct totals.
+  **One real bug found and fixed via live verification:** both new endpoints initially 404'd — not
+  a code defect, but the long-running local dev backend (started earlier in the session, no
+  `--reload`) was still serving the pre-change code; restarting it picked up the new routes
+  immediately.
+
 ### Changed
 - **Project focus narrows to Ledger (iOS) only, going forward (2026-07-20).** The owner said
   explicitly they no longer care about the web dashboard and want work fully focused on the app —

@@ -119,6 +119,22 @@ final class APIClient {
         return try await get("/analytics/by-category", query: query)
     }
 
+    /// Flexible day/week/month/year summary — a separate endpoint from `monthlyAnalytics` above,
+    /// which stays exactly as it was for the web dashboard (BACKLOG.md L1 follow-up).
+    func periodAnalytics(period: String, date: String) async throws -> PeriodAnalytics {
+        try await get(
+            "/analytics/summary",
+            query: [.init(name: "period", value: period), .init(name: "date", value: date)]
+        )
+    }
+
+    func periodCategoryBreakdown(period: String, date: String) async throws -> PeriodCategoryBreakdownResponse {
+        try await get(
+            "/analytics/category-breakdown",
+            query: [.init(name: "period", value: period), .init(name: "date", value: date)]
+        )
+    }
+
     func payeeHistory(payee: String, limit: Int = 50, offset: Int = 0) async throws -> PayeeHistoryResponse {
         // `payee` is passed as its own path segment (not string-interpolated into `path`) so
         // `perform` percent-encodes it exactly once, however many spaces/special characters a
