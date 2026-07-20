@@ -57,9 +57,9 @@ struct AnalyticsView: View {
                 // ADR-0021's sign convention: `net` is `total_debit - total_credit` — positive
                 // means money spent, not received.
                 Section("Summary") {
-                    LabeledContent("Spent") { amountText(monthly.totalDebit, color: .primary) }
-                    LabeledContent("Received") { amountText(monthly.totalCredit, color: .green) }
-                    LabeledContent("Net") { amountText(monthly.net, color: .primary) }
+                    LabeledContent("Debit") { amountText(monthly.totalDebit, color: .red) }
+                    LabeledContent("Credit") { amountText(monthly.totalCredit, color: .green) }
+                    LabeledContent("Net") { amountText(netMagnitude(monthly.net), color: netColor(monthly)) }
                 }
             }
 
@@ -134,6 +134,23 @@ struct AnalyticsView: View {
         Text("\u{20B9}\(value)")
             .font(.body.monospacedDigit())
             .foregroundStyle(color)
+    }
+
+    /// Green when more was received than spent this month, red otherwise. `net` is
+    /// `totalDebit - totalCredit` (ADR-0021), so received-minus-spent is its negation.
+    private func netColor(_ monthly: MonthlyAnalytics) -> Color {
+        guard let debit = Double(monthly.totalDebit), let credit = Double(monthly.totalCredit) else {
+            return .primary
+        }
+        return credit - debit > 0 ? .green : .red
+    }
+
+    /// `net` (`totalDebit - totalCredit`, ADR-0021) is negative whenever credit exceeds debit —
+    /// shown as a magnitude here since `netColor` already conveys the direction; a green "-900.99"
+    /// reads as a contradiction rather than a surplus.
+    private func netMagnitude(_ netString: String) -> String {
+        guard let net = Double(netString) else { return netString }
+        return String(format: "%.2f", abs(net))
     }
 
     private func reload() async {

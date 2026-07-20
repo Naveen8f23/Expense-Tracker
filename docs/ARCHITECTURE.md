@@ -417,10 +417,16 @@ considered and explicitly dropped (ADR-0009) — not an integration in this syst
     are derived from `.gitignore` rather than a second hand-maintained list, so venvs,
     `node_modules`, and the local encryption key/database can't silently drift into being synced
     (or silently stop being synced) as `.gitignore` evolves.
-  - **Why a tunnel, not direct access:** the VM sits on a Tailscale network whose ACLs appear to
-    permit only SSH between nodes — direct connections to the app's own ports (5173/8000) time
-    out even though `ping` and `ssh` both succeed and the VM's own firewall (`ufw`) is inactive.
-    The tunnel rides over the already-permitted SSH connection instead. Configurable via
+  - **Why a tunnel, not direct access (superseded 2026-07-20, ADR-0028):** this reasoning
+    described the VM's *old* topology — reached only through a relative's NAS acting as a
+    Tailscale subnet router, whose ACLs permitted only SSH between nodes, so direct connections
+    to the app's own ports (5173/8000) timed out. The VM has since been found to already have
+    Tailscale installed directly on it, joined to the owner's own personal tailnet as a first-class
+    peer — `curl http://turnny-vm:8000/...` now works directly, no SSH tunnel needed, for the
+    production backend (see ADR-0028). This SSH-tunnel mechanism may therefore no longer be
+    necessary for `vm_dev.py`'s own dev-server-verification use case either, since it was built to
+    work around the same now-resolved constraint — not yet re-verified as of this note, since
+    Ledger is the current focus, not the web dashboard's VM dev loop. Configurable via
     `VM_HOST`/`VM_REMOTE_DIR`/`BACKEND_PORT`/`FRONTEND_PORT` env vars (see `scripts/_vm.py`).
   - **Gap found during Epic F (2026-07-19):** `_STOP_REMOTE_SERVERS`'s pkill patterns
     (`vm_dev.py`) don't match an orphaned `multiprocessing` worker left over from an earlier

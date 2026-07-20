@@ -926,7 +926,11 @@ Copy this block for each new decision:
 ### ADR-0026: The VM was never actually on Tailscale — real topology is a NAS-hosted subnet router, backend bind fixed, port migration pending
 
 - **Date:** 2026-07-19
-- **Status:** Accepted (interim state — not fully resolved; see Consequences)
+- **Status:** Interim state resolved by ADR-0028 (2026-07-20) — see that entry. The specific path
+  anticipated below (brother opening ports 6000-6500, moving the backend off port 8000) was never
+  taken; the actual resolution was installing Tailscale directly on the VM instead. Kept here,
+  unedited, as the historical record of what was actually wrong and why, per this log's
+  append-only convention.
 - **Decision:** Record the actual network topology discovered while getting Ledger to reach the
   production VM, since it differs materially from what ADR-0002/ADR-0020/MOB-5 assumed, and fix
   the one part of it that was unambiguously a bug regardless of topology (the backend's bind
@@ -1025,3 +1029,64 @@ Copy this block for each new decision:
   Ledger screen going forward should keep using semantic/adaptive colors only (no hardcoded
   light-mode-only colors), and any new category-bearing UI should reuse `CategoryColor` rather
   than inventing a second color-assignment scheme.
+
+### ADR-0028: VM reachability resolved — Tailscale installed directly on the VM, joined to the owner's own personal tailnet; Mac and iPhone switched to match
+
+- **Date:** 2026-07-20
+- **Status:** Accepted, supersedes ADR-0026's unresolved interim state.
+- **Decision:**
+  1. Tailscale is installed directly on the VM (`turnny-vm`, already present at v1.98.9 when this
+     was investigated) and joined to the owner's own personal tailnet — the tailnet under
+     `naveen8f23@gmail.com`, the same Google account this whole project's Gmail ingestion already
+     uses. The VM is a first-class peer on this tailnet (MagicDNS name `turnny-vm`, suffix
+     `tailbab0c5.ts.net`), not reached through anyone else's subnet route.
+  2. The owner's Mac and iPhone were switched from being **guest devices on the brother's tailnet**
+     (`dinesh10c04@gmail.com` — the tailnet the brother's NAS/subnet router belongs to) to being
+     members of the owner's **own** tailnet instead (`tailscale login` on the Mac added it as a
+     second local profile, `tailscale switch` made it active; the iPhone's Tailscale app was
+     logged out and back in under the same personal account). Both devices now see `turnny-vm` as
+     a direct peer.
+  3. The brother's NAS/subnet-router path (ADR-0026) is no longer used for reaching the backend at
+     all — not because it was fixed, but because it turned out to be the wrong path entirely.
+     `REQUIREMENTS.md` MOB-5 updated to describe this as the real, working topology.
+- **Context:** ADR-0026 left this unresolved, blocked on the brother opening a port range
+  (6000-6500) on his home router's firewall for a subnet-routed path to the VM. The brother later
+  said opening/closing ports on his end isn't straightforward, and separately became unreachable to
+  ask further questions of — a hard external dependency the project couldn't just wait on. Directly
+  checking the VM (`ssh` + `tailscale status`) turned up a surprise: **Tailscale was already
+  installed and already joined** — apparently done independently at some point (likely by the
+  brother, since he has shell access to the NAS's network) — but joined to the *owner's own*
+  personal tailnet, not the brother's. This meant the VM was never actually unreachable because of
+  a missing feature; it was unreachable only because the owner's own devices (Mac, iPhone) happened
+  to be logged into a *different* tailnet (the brother's) than the one the VM was actually on.
+- **Alternatives considered:**
+  - **Tailscale Services, fronting the VM via the brother's NAS acting as a service host** —
+    researched first (per https://tailscale.com/docs/features/tailscale-services), and would have
+    worked, but requires the brother to run `tailscale serve` commands on his own NAS and stays
+    dependent on his ongoing involvement for any future changes. Once it was discovered the VM
+    already had its own direct tailnet membership, this became unnecessary complexity — abandoned
+    in favor of the option below, per Constitution principle 2 (don't build the indirect solution
+    once the direct one is confirmed to exist).
+  - **Share the VM node from the owner's tailnet into the brother's tailnet** (Tailscale's
+    device-sharing feature), keeping the Mac/iPhone on the brother's tailnet as-is — presented to
+    the owner as the lower-disruption option. The owner explicitly chose to switch the Mac/iPhone
+    onto his own tailnet instead, since he no longer needs anything from the brother's tailnet for
+    this project.
+- **Reasoning:** The owner has full Owner/Admin rights on his own personal tailnet (confirmed
+  directly by him), so this path requires zero further involvement from the brother, for this or
+  any future connectivity change — a meaningfully lower ongoing dependency than either the
+  port-range plan or the Tailscale Services plan, both of which required the brother to keep acting
+  on his own infrastructure. It also matches this project's existing local-first/Tailscale-only
+  posture (ADR-0002, ADR-0025) with no new mechanism introduced — just correcting which tailnet the
+  relevant devices are actually on.
+- **Consequences:** No code changes to Ledger were needed — `ConnectionSettingsStore` (BACKLOG.md
+  I3) already stores host/port as a plain user-entered setting; the owner just re-enters
+  `turnny-vm` / `8000` in the app instead of the Mac's hostname used during interim development.
+  `deploy/expense-tracker.service` keeps its existing `0.0.0.0:8000` bind (ADR-0026) — no port
+  migration was ever needed, since the backend was never the problem. The brother's NAS/subnet
+  router remains configured as it was (still useful for whatever else the owner uses it for) but is
+  no longer load-bearing for this project. Verified directly: `tailscale ping turnny-vm` succeeds
+  (via DERP relay, not a direct connection — fine functionally, ~20ms), and
+  `curl http://turnny-vm:8000/health` and `.../sync/status` both returned real, live data from the
+  Mac after the tailnet switch. ADR-0026 is left unedited as the historical record of the dead-end
+  path; its status line now points here.

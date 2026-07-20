@@ -70,7 +70,15 @@ export default function AnalyticsView() {
             </div>
             <div className="summary-card">
               <span className="metadata">Net</span>
-              <span>₹{summary.net}</span>
+              <span
+                className={
+                  parseFloat(summary.total_credit) - parseFloat(summary.total_debit) > 0
+                    ? "amount-credit"
+                    : "amount-debit"
+                }
+              >
+                ₹{summary.net}
+              </span>
             </div>
             <div className="summary-card">
               <span className="metadata">Transactions</span>
