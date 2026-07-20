@@ -60,9 +60,9 @@ struct PayeeHistoryView: View {
             List {
                 if let summary = store.summary {
                     Section {
-                        LabeledContent("Spent") { amountText(summary.totalDebit, color: .primary) }
-                        LabeledContent("Received") { amountText(summary.totalCredit, color: .green) }
-                        LabeledContent("Net") { amountText(summary.net, color: .primary) }
+                        LabeledContent("Debit") { amountText(summary.totalDebit, color: .red) }
+                        LabeledContent("Credit") { amountText(summary.totalCredit, color: .green) }
+                        LabeledContent("Net") { amountText(netMagnitude(summary.net), color: netColor(summary)) }
                         LabeledContent("Transactions", value: "\(summary.transactionCount)")
                     }
                 }
@@ -97,6 +97,23 @@ struct PayeeHistoryView: View {
         Text("\u{20B9}\(value)")
             .font(.body.monospacedDigit())
             .foregroundStyle(color)
+    }
+
+    /// Green when more was received than spent, red otherwise — mirrors AnalyticsView's own
+    /// `netColor`. `net` is `totalDebit - totalCredit` (ADR-0021), so credit-minus-debit is its
+    /// negation.
+    private func netColor(_ summary: PayeeHistoryResponse) -> Color {
+        guard let debit = Double(summary.totalDebit), let credit = Double(summary.totalCredit) else {
+            return .primary
+        }
+        return credit - debit > 0 ? .green : .red
+    }
+
+    /// Shown as a magnitude since `netColor` already conveys the direction — mirrors
+    /// AnalyticsView's own `netMagnitude`.
+    private func netMagnitude(_ netString: String) -> String {
+        guard let net = Double(netString) else { return netString }
+        return String(format: "%.2f", abs(net))
     }
 
     private func reload() async {

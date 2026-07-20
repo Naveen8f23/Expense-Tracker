@@ -1152,23 +1152,27 @@ Mac during this session while the VM's networking is blocked — see below): scr
 real transactions rendering correctly, including the "Manual" badge (H2) and debit/credit amount
 coloring, both an error state (no connection configured) and a populated list.
 
-**Infrastructure note (2026-07-19, unrelated to J1's own code):** the Ubuntu VM (ADR-0020) turned
-out to have never actually joined Tailscale — REQUIREMENTS.md MOB-5 assumed it had, but it doesn't
-appear anywhere in `dpkg`, has no `tailscaled` process, and isn't reachable at its supposed
-Tailscale address even from the VM itself. Separately, `deploy/expense-tracker.service` was fixed
-to bind `0.0.0.0` instead of `127.0.0.1` (needed regardless, since the old bind made the backend
-unreachable from anywhere but itself) — both the repo file and the live VM unit were updated and
-the service restarted. The VM is actually reached today through the owner's brother's NAS acting
-as a Tailscale subnet router (a different setup than ADR-0002/0020 assumed), which currently only
-allows SSH through its firewall to that subnet — the brother is opening ports 6000-6500 for this.
-**Until that's confirmed open, Ledger development is proceeding against the backend running
-directly on the developer's own Mac** — reachable both via its real Tailscale hostname
-(`naveen-zoho-macbook`) and, for the Simulator, `http://localhost:8000` — not the VM. Full writeup
-in **DECISIONS.md ADR-0026** (interim state, not yet resolved). Once the VM's ports are open: the
-backend's production port likely needs to move into the newly-opened 6000-6500 range instead of
-8000 (update `deploy/expense-tracker.service` + the live VM unit), REQUIREMENTS.md MOB-5 needs
-revising to describe the actual subnet-router topology instead of the originally-assumed one, and
-ADR-0026 itself should be updated to close out the interim state.
+**Infrastructure note (2026-07-19, unrelated to J1's own code; resolved 2026-07-20, see below):**
+the Ubuntu VM (ADR-0020) turned out to have never actually joined Tailscale — REQUIREMENTS.md
+MOB-5 assumed it had, but it doesn't appear anywhere in `dpkg`, has no `tailscaled` process, and
+isn't reachable at its supposed Tailscale address even from the VM itself. Separately,
+`deploy/expense-tracker.service` was fixed to bind `0.0.0.0` instead of `127.0.0.1` (needed
+regardless, since the old bind made the backend unreachable from anywhere but itself) — both the
+repo file and the live VM unit were updated and the service restarted. The VM was, at the time,
+reached through the owner's brother's NAS acting as a Tailscale subnet router, which only allowed
+SSH through its firewall to that subnet — the brother was asked to open ports 6000-6500 for this.
+Ledger development proceeded against the backend running directly on the developer's own Mac in
+the meantime. Full writeup in **DECISIONS.md ADR-0026**.
+
+**Resolved 2026-07-20 (ADR-0028):** opening a port range on the brother's router turned out to be
+impractical for him, and he became unreachable to ask further of. Directly inspecting the VM
+found Tailscale was actually already installed and already joined — just to the owner's *own*
+personal tailnet, not the brother's. The fix was switching the owner's Mac and iPhone from being
+guest devices on the brother's tailnet to being members of the owner's own tailnet instead, making
+`turnny-vm` a direct peer of both — no port range, no subnet router, no further brother
+involvement needed. Ledger's `ConnectionSettingsStore` needed no code change (host/port was
+already user-entered, I3) — just re-entering `turnny-vm` / `8000` in place of the Mac's hostname.
+See DECISIONS.md ADR-0028 for the full resolution.
 
 **Depends on:** I2. **Size:** M.
 

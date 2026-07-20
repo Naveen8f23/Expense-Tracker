@@ -8,6 +8,78 @@ versioned releases begin.
 
 ## [Unreleased]
 
+### Changed
+- **Project focus narrows to Ledger (iOS) only, going forward (2026-07-20).** The owner said
+  explicitly they no longer care about the web dashboard and want work fully focused on the app —
+  recorded here since it changes how future requests should be scoped (parallel web changes are no
+  longer expected unless asked for again).
+- **Analytics summary coloring: Spent always red, Net colored by surplus/deficit (2026-07-20).**
+  Requested directly by the owner. Web (`AnalyticsView.tsx`) already colored "Spent" red via the
+  existing `.amount-debit` class (matching `TransactionRowView`'s own debit convention) — only
+  "Net" needed a change, now `.amount-credit` (green) if `total_credit - total_debit > 0`,
+  `.amount-debit` (red) otherwise. Ledger's `AnalyticsView.swift` needed both: "Spent" was
+  previously uncolored (`.primary`), now `.red`; "Net" gained the same conditional (a new
+  `netColor(_:)` helper, green when `totalCredit - totalDebit > 0`, red otherwise — equivalent to
+  ADR-0021's `net = totalDebit - totalCredit` being negative). Verified live on both platforms
+  against the same real backend data (Spent ₹1490.00 red, Received ₹733.00 green, Net ₹757.00 red
+  since spend exceeded receipts) — a Simulator UI-test screenshot for Ledger, a Browser screenshot
+  for the web dashboard.
+- **Follow-up fixes, Ledger only (2026-07-20):** two things the owner caught live-testing the above
+  with their own real data (spent ₹1469.01, received ₹2370.00): (1) "Net" was showing the raw
+  signed value (`-900.99`) even though its color already conveyed the direction — a green negative
+  number read as a contradiction; fixed with a new `netMagnitude(_:)` helper that displays
+  `abs(net)`, letting color carry the sign. (2) "Spent"/"Received" renamed to "Debit"/"Credit" in
+  `AnalyticsView.swift`, matching the app's own internal terminology (`DebitOrCredit`) rather than
+  the web dashboard's user-facing wording — a deliberate divergence now that iOS is the sole focus.
+  The identical "Spent"/"Received"/uncolored-Net pattern was found and fixed the same way in
+  `PayeeHistoryView.swift` (its own summary card had the same gap, never fixed alongside
+  AnalyticsView's first pass) — `netColor`/`netMagnitude` duplicated there rather than shared,
+  matching this codebase's existing preference for small local helpers per view over a premature
+  shared abstraction. Verified live: Analytics screen shows Debit/Credit/Net correctly for the
+  owner's real July 2026 data; the "NAVEEN V" payee history panel shows Debit ₹34.00 (red), Credit
+  ₹676.00 (green), Net ₹642.00 (green, shown positive since credit exceeds debit).
+
+### Added (code)
+- **Ledger app icon (2026-07-20).** `AppIcon.appiconset` was present but empty since I1 — the app
+  had no real icon, only Xcode's placeholder. Went through several rounds of live iteration with
+  the owner, each checked on a real Simulator home screen before moving to the next:
+  1. Five initial concepts (an "L" monogram, a rupee ledger card, ascending bars, a category-dot
+     ring, and a wallet fold), all on the app's existing black (`LaunchBackground`) with its
+     indigo `AccentColor` (`#8A80FF`, ADR-0027). The owner picked the "L" monogram, then the rupee
+     ledger card instead once seen live (the monogram read as too plain), then had that card
+     scaled up ~1.7x to fill nearly the full 1024×1024 canvas (the first pass left too much unused
+     black margin).
+  2. The owner then asked for a bolder, BHIM/FedMobile-style treatment instead — a full-bleed,
+     solid saturated color fill with one simple bold white pictogram, no card outline or secondary
+     detail. Of three such concepts, the owner picked a simple white wallet/card silhouette with a
+     stripe and a coin-slot circle.
+  3. After trying a few darker solid-indigo shades for the background (per the owner's "too bland"
+     feedback on the first saturated indigo tried), the owner instead asked to reuse an existing
+     app color rather than a new custom shade — specifically `AccentColor`'s own `#8A80FF`, the
+     same indigo the very first "L" concept used, now as the full background fill instead of a
+     small foreground mark.
+  Final: solid `#8A80FF` background, white wallet/card pictogram. Rendered as a flat, fully opaque
+  PNG (no alpha channel, per Apple's app icon requirement) and wired into
+  `Assets.xcassets/AppIcon.appiconset/Contents.json`. Verified: `xcodebuild` succeeds, `assetutil`
+  confirms the compiled asset is `Opaque: True` at the correct size, and a Simulator home-screen
+  screenshot after each iteration confirms it renders correctly and reads clearly at real icon
+  size.
+
+### Fixed
+- **VM reachability finally resolved: Tailscale installed directly on the VM, on the owner's own
+  tailnet — no code changes needed (2026-07-20, ADR-0028).** ADR-0026's interim state (waiting on
+  the brother to open ports 6000-6500 on his home router for a subnet-routed path) was abandoned
+  once the brother said opening/closing ports wasn't straightforward on his end and became
+  unreachable to ask further of. Directly inspecting the VM found Tailscale was already installed
+  and already joined — to the owner's own personal tailnet (`naveen8f23@gmail.com`), not the
+  brother's. The owner's Mac and iPhone were switched from guest devices on the brother's tailnet
+  to members of his own tailnet instead, making `turnny-vm` a direct peer of both. No port range,
+  no subnet router, no further dependency on the brother. Ledger needed no code change —
+  `ConnectionSettingsStore`'s host/port was already a plain user-entered setting (BACKLOG.md I3);
+  the owner just re-entered `turnny-vm` / `8000`. Verified live: `tailscale ping turnny-vm`
+  succeeds (via DERP relay), and `curl http://turnny-vm:8000/health` and `.../sync/status` both
+  returned real data from the Mac after the tailnet switch. See DECISIONS.md ADR-0028.
+
 ### Added (code)
 - **Ledger post-completion visual polish: category colors, dark theme, and two live-testing bug
   fixes (2026-07-19).** Requested directly by the owner while live-testing the just-finished M7
