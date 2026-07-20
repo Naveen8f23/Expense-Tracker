@@ -350,14 +350,37 @@ final class LedgerDemoUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["By Category"].exists)
         capture(app, "demo_l_01_analytics_current_month", scratchDir)
 
-        // L1 — month switcher moves back, re-fetches, and the label changes.
-        let monthLabelBefore = app.staticTexts.matching(NSPredicate(format: "label MATCHES '\\\\d{4}-\\\\d{2}'")).firstMatch.label
+        // Follow-up (2026-07-20): a Day/Week/Month/Year period picker replaced the month-only
+        // switcher — the label format also changed ("July 2026", not "2026-07").
+        let monthLabelBefore = app.staticTexts.matching(NSPredicate(format: "label MATCHES '[A-Za-z]+ \\\\d{4}'")).firstMatch.label
         app.buttons["Previous month"].tap()
         Thread.sleep(forTimeInterval: 1)
-        let monthLabelAfter = app.staticTexts.matching(NSPredicate(format: "label MATCHES '\\\\d{4}-\\\\d{2}'")).firstMatch.label
+        let monthLabelAfter = app.staticTexts.matching(NSPredicate(format: "label MATCHES '[A-Za-z]+ \\\\d{4}'")).firstMatch.label
         XCTAssertNotEqual(monthLabelBefore, monthLabelAfter, "month label must change after Previous")
         capture(app, "demo_l_02_previous_month", scratchDir)
         app.buttons["Next month"].tap() // back to the current month
+        Thread.sleep(forTimeInterval: 1)
+
+        // Switching to Week/Day/Year re-fetches for the new granularity and updates the label
+        // to match (a date range for Week, a single date for Day, just the year for Year).
+        app.segmentedControls.buttons["Week"].tap()
+        Thread.sleep(forTimeInterval: 1)
+        let weekLabel = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '–'")).firstMatch
+        XCTAssertTrue(weekLabel.waitForExistence(timeout: 5), "week view must show a date range")
+        capture(app, "demo_l_01b_analytics_week", scratchDir)
+
+        app.segmentedControls.buttons["Day"].tap()
+        Thread.sleep(forTimeInterval: 1)
+        let dayLabel = app.staticTexts.matching(NSPredicate(format: "label MATCHES '[A-Za-z]+ \\\\d+, \\\\d{4}'")).firstMatch
+        XCTAssertTrue(dayLabel.waitForExistence(timeout: 5), "day view must show a single date")
+
+        app.segmentedControls.buttons["Year"].tap()
+        Thread.sleep(forTimeInterval: 1)
+        let yearLabel = app.staticTexts.matching(NSPredicate(format: "label MATCHES '\\\\d{4}'")).firstMatch
+        XCTAssertTrue(yearLabel.waitForExistence(timeout: 5), "year view must show just the year")
+        capture(app, "demo_l_01c_analytics_year", scratchDir)
+
+        app.segmentedControls.buttons["Month"].tap() // back to the default period
         Thread.sleep(forTimeInterval: 1)
 
         // L3 — tapping a payee name from the Ledger tab opens the payee history panel.

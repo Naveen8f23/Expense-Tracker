@@ -1,37 +1,71 @@
 import Foundation
 
-/// Drives BACKLOG.md L1 (monthly summary) + L2 (category breakdown) — both endpoints share one
-/// month cursor (ADR-0021: G3 reuses G2's month rather than a separate period picker), so this is
-/// one store, not two. Same per-call-`baseURL`, injectable-client-factory shape as the other
-/// stores for testability.
+/// Which granularity the owner is currently viewing (requested directly, 2026-07-20, as a
+/// follow-up to the original month-only view). A week is Monday-start, per the owner's own
+/// choice when asked — `canonicalAnchor`/`shift` below mirror the backend's exact
+/// `anchor - timedelta(days=anchor.weekday())` algorithm (`app/application/analytics.py`) rather
+/// than relying on Foundation's own `weekOfYear` component, so client and server can never
+/// disagree about which 7 days make up "this week."
+enum AnalyticsPeriod: String, CaseIterable, Identifiable, Equatable {
+    case day, week, month, year
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .day: return "Day"
+        case .week: return "Week"
+        case .month: return "Month"
+        case .year: return "Year"
+        }
+    }
+}
+
+/// Drives BACKLOG.md L1 (summary) + L2 (category breakdown) for a flexible day/week/month/year
+/// period. Both endpoints share one period+anchor cursor (same reasoning as the original
+/// month-only cursor, ADR-0021: G3 reuses G2's period rather than a separate picker), so this
+/// remains one store, not two.
 ///
-/// `month` is deliberately mutated by a *plain synchronous* function, not an `async` one that also
-/// triggers its own reload — `AnalyticsView` drives loading via `.task(id: store.month)`, which
-/// SwiftUI already restarts whenever `month` changes. Combining that with a second, independent
-/// `load()` call inside an async `goToPreviousMonth`/`goToNextMonth` created two racing loads per
-/// month change with no defined winner — verified live, where a real device build after tapping
-/// "Previous month" left the label and figures showing the old month, because the `.task`-driven
-/// reload (using the already-updated `month`) and the explicit in-function reload interleaved
-/// unpredictably. One trigger, driven by SwiftUI itself, removes the race entirely.
+/// `period`/`anchorDate` are mutated only by plain synchronous functions, never by anything that
+/// also triggers its own reload — the same race this store's month-only predecessor already found
+/// and fixed live: `AnalyticsView` drives loading via `.task(id: store.cursor)`, which SwiftUI
+/// already restarts whenever the cursor changes, so a second independent reload call would race
+/// it with no defined winner.
 @MainActor
 final class AnalyticsStore: ObservableObject {
-    @Published private(set) var month: String
-    @Published private(set) var monthly: MonthlyAnalytics?
+    /// A single `Equatable` value combining `period` + `anchorDate` for `.task(id:)` to key off —
+    /// SwiftUI's `task(id:)` needs one value to watch, not two.
+    struct Cursor: Equatable {
+        let period: AnalyticsPeriod
+        let anchorDate: Date
+    }
+
+    @Published private(set) var period: AnalyticsPeriod
+    @Published private(set) var anchorDate: Date
+    @Published private(set) var summary: PeriodAnalytics?
     @Published private(set) var categoryBreakdown: [CategoryBreakdownItem] = []
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
 
-    private let makeClient: (URL) -> APIClient
+    var cursor: Cursor { Cursor(period: period, anchorDate: anchorDate) }
 
-    init(makeClient: @escaping (URL) -> APIClient = { APIClient(baseURL: $0) }, initialMonth: String? = nil) {
+    private let makeClient: (URL) -> APIClient
+    private static let calendar = Calendar(identifier: .gregorian)
+
+    init(
+        makeClient: @escaping (URL) -> APIClient = { APIClient(baseURL: $0) },
+        initialPeriod: AnalyticsPeriod = .month,
+        initialAnchorDate: Date = Date()
+    ) {
         self.makeClient = makeClient
-        self.month = initialMonth ?? Self.monthString(for: Date())
+        self.period = initialPeriod
+        self.anchorDate = Self.canonicalAnchor(for: initialPeriod, from: initialAnchorDate)
     }
 
     func load(baseURL: URL?) async {
         guard let baseURL else {
             errorMessage = "Set up the backend connection first (gear icon)."
-            monthly = nil
+            summary = nil
             categoryBreakdown = []
             return
         }
@@ -40,44 +74,67 @@ final class AnalyticsStore: ObservableObject {
         defer { isLoading = false }
         do {
             let client = makeClient(baseURL)
-            async let monthlyResult = client.monthlyAnalytics(month: month)
-            async let breakdownResult = client.categoryBreakdown(month: month)
-            let (monthlySummary, breakdown) = try await (monthlyResult, breakdownResult)
-            monthly = monthlySummary
+            let dateParam = WireDate.format(anchorDate)
+            async let summaryResult = client.periodAnalytics(period: period.rawValue, date: dateParam)
+            async let breakdownResult = client.periodCategoryBreakdown(period: period.rawValue, date: dateParam)
+            let (periodSummary, breakdown) = try await (summaryResult, breakdownResult)
+            summary = periodSummary
             categoryBreakdown = breakdown.categories
         } catch {
             errorMessage = Self.describe(error)
         }
     }
 
-    func goToPreviousMonth() {
-        month = Self.shiftMonth(month, by: -1)
+    /// Re-anchors to the equivalent point in the newly-selected period — e.g. switching from
+    /// "month" to "week" while viewing July 2026 lands on the week containing July 1st, rather
+    /// than resetting to today (keeps context, matches the spirit of the original month cursor).
+    func selectPeriod(_ newPeriod: AnalyticsPeriod) {
+        period = newPeriod
+        anchorDate = Self.canonicalAnchor(for: newPeriod, from: anchorDate)
     }
 
-    func goToNextMonth() {
-        month = Self.shiftMonth(month, by: 1)
+    func goToPrevious() { shift(by: -1) }
+    func goToNext() { shift(by: 1) }
+
+    private func shift(by value: Int) {
+        let calendar = Self.calendar
+        switch period {
+        case .day:
+            anchorDate = calendar.date(byAdding: .day, value: value, to: anchorDate) ?? anchorDate
+        case .week:
+            anchorDate = calendar.date(byAdding: .day, value: value * 7, to: anchorDate) ?? anchorDate
+        case .month:
+            anchorDate = calendar.date(byAdding: .month, value: value, to: anchorDate) ?? anchorDate
+        case .year:
+            anchorDate = calendar.date(byAdding: .year, value: value, to: anchorDate) ?? anchorDate
+        }
     }
 
-    /// Fixed-format, non-user-facing date parsing must pin `locale` to `en_US_POSIX` — without it,
-    /// `DateFormatter` can behave inconsistently under some device locale/calendar settings (a
-    /// well-known Foundation gotcha) for a literal pattern like "yyyy-MM".
-    private static func makeFixedFormatFormatter() -> DateFormatter {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.dateFormat = "yyyy-MM"
-        return formatter
-    }
-
-    private static func monthString(for date: Date) -> String {
-        makeFixedFormatFormatter().string(from: date)
-    }
-
-    private static func shiftMonth(_ month: String, by delta: Int) -> String {
-        let formatter = makeFixedFormatFormatter()
-        guard let date = formatter.date(from: month) else { return month }
-        let shifted = Calendar(identifier: .gregorian).date(byAdding: .month, value: delta, to: date) ?? date
-        return formatter.string(from: shifted)
+    /// Normalizes to the canonical start of the period containing `date` — the first of the
+    /// month, January 1st, or (for a week) the Monday computed the same way the backend computes
+    /// it, so repeated `goToPrevious`/`goToNext` calls (built on this canonical value) never drift
+    /// out of step with what the server considers "this period."
+    static func canonicalAnchor(for period: AnalyticsPeriod, from date: Date) -> Date {
+        let calendar = Self.calendar
+        let startOfDay = calendar.startOfDay(for: date)
+        switch period {
+        case .day:
+            return startOfDay
+        case .week:
+            // Foundation's `.weekday` is always Sunday=1...Saturday=7, regardless of any
+            // `firstWeekday` setting — converted here to "days since Monday" (0...6) to match
+            // Python's `date.weekday()` (Monday=0) exactly, the same convention
+            // `app/application/analytics.py`'s `week_bounds` uses.
+            let sundayBased = calendar.component(.weekday, from: startOfDay)
+            let daysSinceMonday = (sundayBased + 5) % 7
+            return calendar.date(byAdding: .day, value: -daysSinceMonday, to: startOfDay) ?? startOfDay
+        case .month:
+            let components = calendar.dateComponents([.year, .month], from: startOfDay)
+            return calendar.date(from: components) ?? startOfDay
+        case .year:
+            let components = calendar.dateComponents([.year], from: startOfDay)
+            return calendar.date(from: components) ?? startOfDay
+        }
     }
 
     private static func describe(_ error: Error) -> String {

@@ -167,6 +167,174 @@ class TestMonthlySummary:
         assert response.status_code == 422
 
 
+class TestPeriodSummary:
+    """The flexible day/week/month/year endpoint, requested directly by the owner after the
+    month-only view (BACKLOG.md L1 follow-up) -- a new endpoint, `/monthly` untouched above."""
+
+    def test_day_only_counts_that_exact_date(self, client):
+        test_client, session_factory = client
+        session = session_factory()
+        user = ensure_default_user(session)
+        _make_transaction(
+            session, user, amount="50.00", txn_date_=date(2026, 7, 15), payee_identifier="a@x",
+        )
+        _make_transaction(
+            session, user, amount="999.00", txn_date_=date(2026, 7, 14), payee_identifier="b@x",
+        )
+        _make_transaction(
+            session, user, amount="999.00", txn_date_=date(2026, 7, 16), payee_identifier="c@x",
+        )
+        session.close()
+
+        response = test_client.get(
+            "/analytics/summary", params={"period": "day", "date": "2026-07-15"}
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["period"] == "day"
+        assert body["start_date"] == "2026-07-15"
+        assert body["end_date"] == "2026-07-15"
+        assert body["total_debit"] == "50.00"
+        assert body["transaction_count"] == 1
+
+    def test_week_is_monday_start_and_excludes_the_surrounding_days(self, client):
+        # 2026-07-15 is a Wednesday; its Monday-start week is 2026-07-13..2026-07-19.
+        test_client, session_factory = client
+        session = session_factory()
+        user = ensure_default_user(session)
+        _make_transaction(
+            session, user, amount="10.00", txn_date_=date(2026, 7, 13), payee_identifier="mon",
+        )
+        _make_transaction(
+            session, user, amount="20.00", txn_date_=date(2026, 7, 19), payee_identifier="sun",
+        )
+        _make_transaction(
+            session, user, amount="999.00", txn_date_=date(2026, 7, 12), payee_identifier="prev_sun",
+        )
+        _make_transaction(
+            session, user, amount="999.00", txn_date_=date(2026, 7, 20), payee_identifier="next_mon",
+        )
+        session.close()
+
+        response = test_client.get(
+            "/analytics/summary", params={"period": "week", "date": "2026-07-15"}
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["start_date"] == "2026-07-13"
+        assert body["end_date"] == "2026-07-19"
+        assert body["total_debit"] == "30.00"
+        assert body["transaction_count"] == 2
+
+    def test_month_matches_the_legacy_monthly_endpoint(self, client):
+        test_client, session_factory = client
+        session = session_factory()
+        user = ensure_default_user(session)
+        _make_transaction(
+            session, user, amount="100.00", txn_date_=date(2026, 7, 1), payee_identifier="a@x",
+        )
+        _make_transaction(
+            session, user, amount="500.00", txn_date_=date(2026, 6, 30), payee_identifier="b@x",
+        )
+        session.close()
+
+        response = test_client.get(
+            "/analytics/summary", params={"period": "month", "date": "2026-07-15"}
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["start_date"] == "2026-07-01"
+        assert body["end_date"] == "2026-07-31"
+        assert body["total_debit"] == "100.00"
+
+    def test_year_spans_the_whole_calendar_year(self, client):
+        test_client, session_factory = client
+        session = session_factory()
+        user = ensure_default_user(session)
+        _make_transaction(
+            session, user, amount="10.00", txn_date_=date(2026, 1, 1), payee_identifier="a@x",
+        )
+        _make_transaction(
+            session, user, amount="20.00", txn_date_=date(2026, 12, 31), payee_identifier="b@x",
+        )
+        _make_transaction(
+            session, user, amount="999.00", txn_date_=date(2025, 12, 31), payee_identifier="c@x",
+        )
+        _make_transaction(
+            session, user, amount="999.00", txn_date_=date(2027, 1, 1), payee_identifier="d@x",
+        )
+        session.close()
+
+        response = test_client.get(
+            "/analytics/summary", params={"period": "year", "date": "2026-06-01"}
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["start_date"] == "2026-01-01"
+        assert body["end_date"] == "2026-12-31"
+        assert body["total_debit"] == "30.00"
+        assert body["transaction_count"] == 2
+
+    def test_defaults_to_today_when_date_omitted(self, client):
+        test_client, _ = client
+        response = test_client.get("/analytics/summary", params={"period": "day"})
+        assert response.status_code == 200
+        assert "start_date" in response.json()
+
+    def test_invalid_period_is_rejected(self, client):
+        test_client, _ = client
+        response = test_client.get(
+            "/analytics/summary", params={"period": "fortnight", "date": "2026-07-15"}
+        )
+        assert response.status_code == 422
+
+    def test_invalid_date_format_is_rejected(self, client):
+        test_client, _ = client
+        response = test_client.get(
+            "/analytics/summary", params={"period": "day", "date": "not-a-date"}
+        )
+        assert response.status_code == 422
+
+
+class TestPeriodCategoryBreakdown:
+    def test_groups_debits_by_category_within_the_period(self, client):
+        test_client, session_factory = client
+        session = session_factory()
+        user = ensure_default_user(session)
+        food = Category(user_id=user.id, name="Food")
+        session.add(food)
+        session.commit()
+
+        _make_transaction(
+            session, user, amount="100.00", category_id=food.id,
+            txn_date_=date(2026, 7, 15), payee_identifier="a@x",
+        )
+        _make_transaction(
+            session, user, amount="1000.00", category_id=food.id, txn_type=DebitOrCredit.CREDIT,
+            txn_date_=date(2026, 7, 15), payee_identifier="b@x",
+        )
+        _make_transaction(
+            session, user, amount="999.00", category_id=food.id,
+            txn_date_=date(2026, 7, 16), payee_identifier="c@x",
+        )
+        session.close()
+
+        response = test_client.get(
+            "/analytics/category-breakdown", params={"period": "day", "date": "2026-07-15"}
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["start_date"] == "2026-07-15"
+        assert body["end_date"] == "2026-07-15"
+        by_name = {c["category_name"]: c for c in body["categories"]}
+        assert by_name["Food"]["total"] == "100.00"
+
+
 class TestCategoryBreakdown:
     def test_groups_debits_by_category_and_excludes_credits(self, client):
         test_client, session_factory = client

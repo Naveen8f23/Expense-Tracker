@@ -101,6 +101,20 @@ struct MonthlyAnalytics: Codable, Equatable {
     let transactionCount: Int
 }
 
+/// The flexible day/week/month/year summary (a new endpoint, `GET /analytics/summary`, alongside
+/// `MonthlyAnalytics`'s existing `/analytics/monthly` — the month-only endpoint is untouched, only
+/// used by the web dashboard now). `startDate`/`endDate` are both inclusive, unlike the backend's
+/// own internal half-open range — the API layer already converted that for display purposes.
+struct PeriodAnalytics: Codable, Equatable {
+    let period: String
+    let startDate: String
+    let endDate: String
+    let totalDebit: String
+    let totalCredit: String
+    let net: String
+    let transactionCount: Int
+}
+
 struct CategoryBreakdownItem: Codable, Equatable, Identifiable {
     let categoryId: Int?
     let categoryName: String
@@ -112,6 +126,16 @@ struct CategoryBreakdownItem: Codable, Equatable, Identifiable {
 
 struct CategoryBreakdownResponse: Codable {
     let month: String
+    let categories: [CategoryBreakdownItem]
+}
+
+/// Mirrors `CategoryBreakdownResponse`, for the new flexible-period endpoint
+/// (`GET /analytics/category-breakdown`) — reuses `CategoryBreakdownItem` as-is, since the item
+/// shape itself doesn't change with the period.
+struct PeriodCategoryBreakdownResponse: Codable {
+    let period: String
+    let startDate: String
+    let endDate: String
     let categories: [CategoryBreakdownItem]
 }
 

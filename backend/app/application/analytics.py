@@ -32,17 +32,44 @@ def month_bounds(month: date) -> tuple[date, date]:
     return start, end
 
 
-@dataclass
-class MonthlySummary:
-    month: str
-    total_debit: Decimal
-    total_credit: Decimal
-    net: Decimal
-    transaction_count: int
+def day_bounds(anchor: date) -> tuple[date, date]:
+    """The single day `anchor` falls in, half-open [start, end)."""
+    return anchor, anchor + timedelta(days=1)
 
 
-def get_monthly_summary(session: Session, user: User, month: date) -> MonthlySummary:
-    start, end = month_bounds(month)
+def week_bounds(anchor: date) -> tuple[date, date]:
+    """The Monday-start calendar week containing `anchor` (owner's choice, 2026-07-20), half-open
+    [start, end). `date.weekday()` is already Monday=0, so no other convention is possible here
+    without an explicit offset -- this stays correct regardless of the anchor's own weekday."""
+    start = anchor - timedelta(days=anchor.weekday())
+    return start, start + timedelta(days=7)
+
+
+def year_bounds(anchor: date) -> tuple[date, date]:
+    """The calendar year containing `anchor`, half-open [start, end)."""
+    return date(anchor.year, 1, 1), date(anchor.year + 1, 1, 1)
+
+
+_PERIOD_BOUNDS = {
+    "day": day_bounds,
+    "week": week_bounds,
+    "month": month_bounds,
+    "year": year_bounds,
+}
+
+
+def period_bounds(period: str, anchor: date) -> tuple[date, date]:
+    """Dispatches to the right `*_bounds` function for a flexible-period request (BACKLOG.md L1
+    follow-up, ANL-1/ANL-4). Validated at the boundary by the router (Constitution principle 22) --
+    an unknown period reaching here is a programming error, not user input, hence the plain
+    `KeyError` rather than a second validation pass."""
+    return _PERIOD_BOUNDS[period](anchor)
+
+
+def _aggregate_totals(session: Session, user: User, start: date, end: date) -> tuple[Decimal, Decimal, int]:
+    """Shared by `get_monthly_summary` (legacy, month-only) and `get_period_summary` (flexible
+    day/week/month/year) so the two can never disagree about what counts -- one query shape, two
+    different ways of computing the [start, end) range to feed it."""
     rows = (
         session.query(
             Transaction.txn_type,
@@ -68,9 +95,51 @@ def get_monthly_summary(session: Session, user: User, month: date) -> MonthlySum
             total_debit = total
         else:
             total_credit = total
+    return total_debit, total_credit, transaction_count
 
+
+@dataclass
+class MonthlySummary:
+    month: str
+    total_debit: Decimal
+    total_credit: Decimal
+    net: Decimal
+    transaction_count: int
+
+
+def get_monthly_summary(session: Session, user: User, month: date) -> MonthlySummary:
+    start, end = month_bounds(month)
+    total_debit, total_credit, transaction_count = _aggregate_totals(session, user, start, end)
     return MonthlySummary(
         month=start.strftime("%Y-%m"),
+        total_debit=total_debit,
+        total_credit=total_credit,
+        net=total_debit - total_credit,
+        transaction_count=transaction_count,
+    )
+
+
+@dataclass
+class PeriodSummary:
+    period: str
+    start_date: date
+    end_date: date  # inclusive last day covered, not the half-open exclusive bound
+    total_debit: Decimal
+    total_credit: Decimal
+    net: Decimal
+    transaction_count: int
+
+
+def get_period_summary(session: Session, user: User, period: str, anchor: date) -> PeriodSummary:
+    """Flexible-period summary (day/week/month/year), requested directly by the owner after
+    G2/L1's month-only view -- see DECISIONS.md for why this is a new endpoint rather than an
+    extension of the existing month-only one (web dashboard compatibility)."""
+    start, end = period_bounds(period, anchor)
+    total_debit, total_credit, transaction_count = _aggregate_totals(session, user, start, end)
+    return PeriodSummary(
+        period=period,
+        start_date=start,
+        end_date=end - timedelta(days=1),
         total_debit=total_debit,
         total_credit=total_credit,
         net=total_debit - total_credit,
@@ -92,10 +161,10 @@ class CategoryBreakdown:
     categories: list[CategoryBreakdownItem]
 
 
-def get_category_breakdown(session: Session, user: User, month: date) -> CategoryBreakdown:
-    """"Spend by category" (ANL-2) -- debits only (ADR-0021): a refund/credit isn't spend, so
-    including it here would understate what was actually spent in a category."""
-    start, end = month_bounds(month)
+def _category_rows(session: Session, user: User, start: date, end: date) -> list[CategoryBreakdownItem]:
+    """Shared by `get_category_breakdown` (legacy, month-only) and `get_period_category_breakdown`
+    (flexible day/week/month/year) -- same "debits only" reasoning (ADR-0021) applies regardless
+    of how the [start, end) range was computed."""
     rows = (
         session.query(
             Category.id,
@@ -116,7 +185,7 @@ def get_category_breakdown(session: Session, user: User, month: date) -> Categor
         .order_by(func.sum(Transaction.amount).desc())
         .all()
     )
-    categories = [
+    return [
         CategoryBreakdownItem(
             category_id=category_id,
             category_name=category_name if category_name is not None else "Uncategorized",
@@ -125,7 +194,35 @@ def get_category_breakdown(session: Session, user: User, month: date) -> Categor
         )
         for category_id, category_name, total, count in rows
     ]
+
+
+def get_category_breakdown(session: Session, user: User, month: date) -> CategoryBreakdown:
+    """"Spend by category" (ANL-2) -- debits only (ADR-0021): a refund/credit isn't spend, so
+    including it here would understate what was actually spent in a category."""
+    start, end = month_bounds(month)
+    categories = _category_rows(session, user, start, end)
     return CategoryBreakdown(month=start.strftime("%Y-%m"), categories=categories)
+
+
+@dataclass
+class PeriodCategoryBreakdown:
+    period: str
+    start_date: date
+    end_date: date  # inclusive last day covered, not the half-open exclusive bound
+    categories: list[CategoryBreakdownItem]
+
+
+def get_period_category_breakdown(
+    session: Session, user: User, period: str, anchor: date
+) -> PeriodCategoryBreakdown:
+    start, end = period_bounds(period, anchor)
+    categories = _category_rows(session, user, start, end)
+    return PeriodCategoryBreakdown(
+        period=period,
+        start_date=start,
+        end_date=end - timedelta(days=1),
+        categories=categories,
+    )
 
 
 def get_payee_history(

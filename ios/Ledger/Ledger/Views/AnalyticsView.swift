@@ -1,7 +1,8 @@
 import SwiftUI
 
-// BACKLOG.md L1 (monthly summary) + L2 (category breakdown). Both endpoints share one month
-// cursor (ADR-0021) rather than a separate period picker.
+// BACKLOG.md L1 (summary) + L2 (category breakdown), now for a flexible day/week/month/year
+// period rather than month-only — both endpoints share one period+anchor cursor (ADR-0021's
+// "shared cursor" reasoning still applies) rather than a separate picker per card.
 struct AnalyticsView: View {
     @EnvironmentObject private var connectionSettings: ConnectionSettingsStore
     @StateObject private var store = AnalyticsStore()
@@ -10,18 +11,18 @@ struct AnalyticsView: View {
         NavigationStack {
             content
                 .navigationTitle("Analytics")
-                // Driven by `store.month` (see AnalyticsStore's doc comment) — this is the one
-                // and only trigger for loading; `goToPreviousMonth`/`goToNextMonth` just change
-                // `month` and let SwiftUI restart this task, rather than each also calling load()
-                // themselves and racing with this one.
-                .task(id: store.month) { await reload() }
+                // Driven by `store.cursor` (see AnalyticsStore's doc comment) — this is the one
+                // and only trigger for loading; `goToPrevious`/`goToNext`/`selectPeriod` just
+                // change `period`/`anchorDate` and let SwiftUI restart this task, rather than each
+                // also calling load() themselves and racing with this one.
+                .task(id: store.cursor) { await reload() }
                 .refreshable { await reload() }
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        if let errorMessage = store.errorMessage, store.monthly == nil {
+        if let errorMessage = store.errorMessage, store.summary == nil {
             ContentUnavailableView {
                 Label("Couldn't load analytics", systemImage: "wifi.slash")
             } description: {
@@ -30,15 +31,17 @@ struct AnalyticsView: View {
                 Button("Try again") { Task { await reload() } }
             }
         } else {
-            // The month switcher lives outside the List (mirrors LedgerListView's own
-            // payeeField/chipsRow, which sit beside its List rather than inside a Section) — a
-            // `Section`'s direct, non-`ForEach` content didn't reliably re-render on `store.month`
-            // changes when nested inside the List below, verified live: the label and every
-            // figure on screen stayed frozen after tapping Previous/Next despite the store's
-            // `month` genuinely changing (confirmed via direct instrumentation). Moving it out
-            // uses the same List/VStack split already proven to work elsewhere in this app.
+            // The period picker and cursor switcher live outside the List (mirrors
+            // LedgerListView's own payeeField/chipsRow, which sit beside its List rather than
+            // inside a Section) — a `Section`'s direct, non-`ForEach` content didn't reliably
+            // re-render on cursor changes when nested inside the List below, verified live with
+            // the original month-only switcher. Moving it out uses the same List/VStack split
+            // already proven to work elsewhere in this app.
             VStack(spacing: 0) {
-                monthSwitcher
+                periodPicker
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                cursorSwitcher
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
                 list
@@ -49,17 +52,17 @@ struct AnalyticsView: View {
     @ViewBuilder
     private var list: some View {
         List {
-            if store.isLoading && store.monthly == nil {
+            if store.isLoading && store.summary == nil {
                 Section {
                     ProgressView()
                 }
-            } else if let monthly = store.monthly {
+            } else if let summary = store.summary {
                 // ADR-0021's sign convention: `net` is `total_debit - total_credit` — positive
                 // means money spent, not received.
                 Section("Summary") {
-                    LabeledContent("Debit") { amountText(monthly.totalDebit, color: .red) }
-                    LabeledContent("Credit") { amountText(monthly.totalCredit, color: .green) }
-                    LabeledContent("Net") { amountText(netMagnitude(monthly.net), color: netColor(monthly)) }
+                    LabeledContent("Debit") { amountText(summary.totalDebit, color: .red) }
+                    LabeledContent("Credit") { amountText(summary.totalCredit, color: .green) }
+                    LabeledContent("Net") { amountText(netMagnitude(summary.net), color: netColor(summary)) }
                 }
             }
 
@@ -91,35 +94,85 @@ struct AnalyticsView: View {
                         .padding(.vertical, 2)
                     }
                 }
-            } else if store.monthly != nil {
+            } else if store.summary != nil {
                 Section {
-                    Text("No spending this month").foregroundStyle(.secondary)
+                    Text("No spending in this \(store.period.label.lowercased())").foregroundStyle(.secondary)
                 }
             }
         }
         .listStyle(.insetGrouped)
     }
 
-    private var monthSwitcher: some View {
+    private var periodPicker: some View {
+        Picker(
+            "Period",
+            selection: Binding(get: { store.period }, set: { store.selectPeriod($0) })
+        ) {
+            ForEach(AnalyticsPeriod.allCases) { period in
+                Text(period.label).tag(period)
+            }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    private var cursorSwitcher: some View {
         HStack {
             Button {
-                store.goToPreviousMonth()
+                store.goToPrevious()
             } label: {
                 Image(systemName: "chevron.left")
             }
-            .accessibilityLabel("Previous month")
+            .accessibilityLabel("Previous \(store.period.label.lowercased())")
             Spacer()
-            Text(store.month)
+            Text(cursorLabel)
                 .font(.headline)
             Spacer()
             Button {
-                store.goToNextMonth()
+                store.goToNext()
             } label: {
                 Image(systemName: "chevron.right")
             }
-            .accessibilityLabel("Next month")
+            .accessibilityLabel("Next \(store.period.label.lowercased())")
         }
     }
+
+    /// Formatted from the summary's own `startDate`/`endDate` (rather than recomputed client-side
+    /// from `store.anchorDate`) so the label always matches exactly what the server actually
+    /// aggregated, never a client-side guess about period boundaries.
+    private var cursorLabel: String {
+        guard let summary = store.summary, let start = WireDate.parse(summary.startDate) else {
+            return ""
+        }
+        switch store.period {
+        case .day:
+            return Self.dayFormatter.string(from: start)
+        case .week:
+            guard let end = WireDate.parse(summary.endDate) else { return Self.dayFormatter.string(from: start) }
+            return "\(Self.dayFormatter.string(from: start)) – \(Self.dayFormatter.string(from: end))"
+        case .month:
+            return Self.monthFormatter.string(from: start)
+        case .year:
+            return Self.yearFormatter.string(from: start)
+        }
+    }
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, yyyy"
+        return formatter
+    }()
+
+    private static let monthFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM yyyy"
+        return formatter
+    }()
+
+    private static let yearFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy"
+        return formatter
+    }()
 
     /// This category's share of the breakdown's total spend, as a `0...1` fraction for the bar's
     /// width — a display-only computation, purely derived from what's already on screen.
@@ -136,10 +189,10 @@ struct AnalyticsView: View {
             .foregroundStyle(color)
     }
 
-    /// Green when more was received than spent this month, red otherwise. `net` is
+    /// Green when more was received than spent this period, red otherwise. `net` is
     /// `totalDebit - totalCredit` (ADR-0021), so received-minus-spent is its negation.
-    private func netColor(_ monthly: MonthlyAnalytics) -> Color {
-        guard let debit = Double(monthly.totalDebit), let credit = Double(monthly.totalCredit) else {
+    private func netColor(_ summary: PeriodAnalytics) -> Color {
+        guard let debit = Double(summary.totalDebit), let credit = Double(summary.totalCredit) else {
             return .primary
         }
         return credit - debit > 0 ? .green : .red
