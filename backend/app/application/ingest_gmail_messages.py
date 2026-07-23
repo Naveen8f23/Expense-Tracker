@@ -28,12 +28,14 @@ def store_new_messages(
     messages.list's `q=`) History API results aren't sender-scoped -- without this hook, that
     filtering would otherwise mean a second, redundant fetch per message.
 
-    A message that fails to read (GmailIngestionError -- e.g. no readable text/html or
-    text/plain body part) is counted as failed and the loop continues (B5, ING-8): one oddly
-    formatted email must not block every other message in the same sync run from being stored.
-    It isn't recorded as an EmailMessage row, so it will be retried on the next sync (not on
-    disk yet, so not in existing_ids). Any other exception (network, auth) is a systemic
-    problem, not a per-message one, and is left to propagate and abort the run as before.
+    A message that fails to fetch or read (GmailIngestionError -- e.g. it was deleted from Gmail
+    after being listed but before this fetch, or has no readable text/html or text/plain body
+    part) is counted as failed and the loop continues (B5, ING-8): one bad message must not block
+    every other message in the same sync run from being stored. It isn't recorded as an
+    EmailMessage row, so it will be retried on the next sync (not on disk yet, so not in
+    existing_ids) -- fine for a parse failure, and a harmless no-op retry for a message that's
+    genuinely gone. Any other exception (network, auth) is a systemic problem, not a per-message
+    one, and is left to propagate and abort the run as before.
     """
     existing_ids = (
         {
@@ -54,7 +56,13 @@ def store_new_messages(
         if message_id in existing_ids:
             skipped += 1
             continue
-        message = gmail_client.get_message(credentials, message_id)
+        try:
+            message = gmail_client.get_message(credentials, message_id)
+        except gmail_client.GmailIngestionError:
+            # e.g. the message was deleted from Gmail after being listed but before this fetch --
+            # a per-message condition (B5/ING-8), not a reason to abort the whole sync run.
+            failed += 1
+            continue
         if keep_if is not None and not keep_if(message):
             filtered_out += 1
             continue

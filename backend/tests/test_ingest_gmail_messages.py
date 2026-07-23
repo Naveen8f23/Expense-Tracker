@@ -60,6 +60,33 @@ def test_one_unreadable_message_is_counted_failed_without_blocking_the_rest(
     assert stored_ids == {"msg-good-1", "msg-good-2"}
 
 
+def test_a_message_that_404s_on_fetch_is_counted_failed_without_blocking_the_rest(
+    session, connection, monkeypatch
+):
+    # A message deleted from Gmail after being listed but before this fetch (real 2026-07-22
+    # incident: an unrelated 404 during sync aborted the whole run, since the fetch call wasn't
+    # wrapped the same way the parse step already was) must not block the other messages either.
+    def fake_get_message(credentials, message_id):
+        if message_id == "msg-deleted":
+            raise gmail_client.GmailIngestionError("Message msg-deleted no longer exists in Gmail")
+        return _fake_message(message_id)
+
+    monkeypatch.setattr(gmail_client, "get_message", fake_get_message)
+    monkeypatch.setattr(gmail_client, "extract_message_content", lambda message: f"content for {message['id']}")
+
+    matched, skipped, filtered_out, failed = store_new_messages(
+        session, connection, credentials=None, message_ids=["msg-good-1", "msg-deleted", "msg-good-2"]
+    )
+
+    assert matched == 2
+    assert skipped == 0
+    assert filtered_out == 0
+    assert failed == 1
+
+    stored_ids = {row.message_id for row in session.query(EmailMessage).all()}
+    assert stored_ids == {"msg-good-1", "msg-good-2"}
+
+
 def test_a_failed_message_is_not_recorded_so_it_will_be_retried_next_sync(
     session, connection, monkeypatch
 ):
