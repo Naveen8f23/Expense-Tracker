@@ -60,13 +60,25 @@ def list_message_ids(credentials, query: str) -> list[str]:
 
 
 def get_message(credentials, message_id: str) -> dict:
+    """Raises `GmailIngestionError` if Gmail no longer has this message (a 404) -- e.g. the user
+    deleted it between it being listed (via search or the History API) and this fetch actually
+    happening. This is a per-message condition, not a systemic one (ING-8: one message like this
+    must not abort an entire sync run), the same reasoning `list_message_ids_since_history` below
+    already applies to an expired history checkpoint."""
     service = _build_service(credentials)
-    return (
-        service.users()
-        .messages()
-        .get(userId="me", id=message_id, format="full")
-        .execute(num_retries=_NUM_RETRIES)
-    )
+    try:
+        return (
+            service.users()
+            .messages()
+            .get(userId="me", id=message_id, format="full")
+            .execute(num_retries=_NUM_RETRIES)
+        )
+    except HttpError as exc:
+        if exc.resp.status == 404:
+            raise GmailIngestionError(
+                f"Message {message_id} no longer exists in Gmail (likely deleted since being listed)"
+            ) from exc
+        raise
 
 
 def get_current_history_id(credentials) -> str:

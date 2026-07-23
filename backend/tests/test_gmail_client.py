@@ -57,6 +57,65 @@ def test_list_message_ids_follows_pagination_to_completion(monkeypatch):
     assert fake_messages.calls == 2
 
 
+class _FakeHttpResponse:
+    """Minimal stand-in for the `httplib2.Response`-like object `HttpError` wraps -- only
+    `.status` is actually read by `get_message`'s own error-handling (`exc.resp.status`)."""
+
+    def __init__(self, status):
+        self.status = status
+        self.reason = "error"
+
+
+def _fake_http_error(status):
+    from googleapiclient.errors import HttpError
+
+    return HttpError(_FakeHttpResponse(status), b'{"error": {"message": "boom"}}')
+
+
+def _fake_service_raising(exc):
+    class _FakeExecution:
+        def execute(self, num_retries=0):
+            raise exc
+
+    class _FakeMessages:
+        def get(self, userId, id, format):
+            return _FakeExecution()
+
+    class _FakeUsers:
+        def messages(self):
+            return _FakeMessages()
+
+    class _FakeService:
+        def users(self):
+            return _FakeUsers()
+
+    return _FakeService()
+
+
+def test_get_message_translates_a_404_into_gmail_ingestion_error(monkeypatch):
+    # The real 2026-07-22 incident: a message deleted from Gmail between being listed and this
+    # fetch -- a per-message condition (ING-8), not a reason to abort the whole sync run.
+    monkeypatch.setattr(
+        gmail_client, "build", lambda *a, **k: _fake_service_raising(_fake_http_error(404))
+    )
+
+    with pytest.raises(gmail_client.GmailIngestionError):
+        gmail_client.get_message(credentials=None, message_id="msg-deleted")
+
+
+def test_get_message_lets_a_non_404_error_propagate_unchanged(monkeypatch):
+    # A 401/403/5xx is a systemic problem (auth, quota, Gmail outage), not a per-message one --
+    # it must still abort the run rather than being silently absorbed as "just one bad message."
+    from googleapiclient.errors import HttpError
+
+    monkeypatch.setattr(
+        gmail_client, "build", lambda *a, **k: _fake_service_raising(_fake_http_error(500))
+    )
+
+    with pytest.raises(HttpError):
+        gmail_client.get_message(credentials=None, message_id="msg-x")
+
+
 def test_extract_message_content_from_single_part_message():
     message = {"payload": {"body": {"data": _b64url("plain single-part body")}}}
     assert gmail_client.extract_message_content(message) == "plain single-part body"

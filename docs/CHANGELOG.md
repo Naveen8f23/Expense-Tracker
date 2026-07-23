@@ -8,6 +8,29 @@ versioned releases begin.
 
 ## [Unreleased]
 
+### Fixed
+- **A message deleted from Gmail between being listed and fetched could silently abort an entire
+  sync run (2026-07-22).** Found live by the owner: a real sync on the production VM failed with
+  `HttpError 404 ... Requested entity was not found` for a specific message ID, and
+  `sync_state`'s `last_scanned`/`last_matched`/`last_failed` all read `0` — the run had crashed
+  before counting anything, not merely flagged one bad message the way B5's existing per-message
+  error handling was designed to. Root cause: `store_new_messages`
+  (`app/application/ingest_gmail_messages.py`) already wrapped `extract_message_content` (parsing)
+  in a `try`/`except GmailIngestionError`, but the `get_message` fetch call itself sat outside
+  that boundary entirely, so a 404 there (Gmail simply no longer has the message — e.g. the user
+  deleted it after the History API listed it as new but before this fetch ran) propagated
+  uncaught and aborted the whole batch. Fixed in two places: `gmail_client.get_message`
+  (`app/infrastructure/gmail_client.py`) now catches a 404 `HttpError` and re-raises it as
+  `GmailIngestionError`, mirroring the exact pattern `list_message_ids_since_history` already used
+  for an expired history checkpoint; `store_new_messages` now wraps the fetch call in the same
+  per-message try/except the parse step already had, so this is counted as a failure and the loop
+  continues, exactly like an unreadable message already was. Not related to the owner's Tailscale
+  VPN toggle they suspected — a coincidental correlation, not the actual cause. 159/159 backend
+  tests passing (3 new: a direct `get_message` 404-translation test, a non-404 propagates-unchanged
+  test, and a `store_new_messages` test mirroring the existing unreadable-message one). Verified
+  on the real VM: deployed via `scripts/deploy_vm.py`, and `sync_state.last_error` cleared to
+  `null` on the very next background sync cycle.
+
 ### Added (code)
 - **Ledger: flexible day/week/month/year analytics, closing out ANL-1 in full (2026-07-20).**
   Requested directly by the owner — the Analytics tab only ever supported "month," even though
